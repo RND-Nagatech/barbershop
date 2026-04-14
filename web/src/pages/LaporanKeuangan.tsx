@@ -42,12 +42,12 @@ export default function LaporanKeuangan() {
 
   const grandTotal = data.reduce((sum, d) => sum + d.total, 0);
 
-  const headers = ["Kode", "Nama Layanan", "Jumlah Transaksi", "Total (Rp)"];
-  const rows = data.map((d) => [d.kode, d.nama, d.jumlah, formatRp(d.total)]);
-  const footer = ["", "Grand Total", "", formatRp(grandTotal)];
+  const headersV2 = ["Tipe", "Kode", "Nama", "Jumlah", "Total (Rp)"];
+  const rows = data.map((d) => [d.tipe || "-", d.kode, d.nama, d.jumlah, formatRp(d.total)]);
+  const footer = ["", "", "Grand Total", "", formatRp(grandTotal)];
 
-  const handleExcel = () => exportToExcel("Laporan Keuangan", headers, rows, "laporan_keuangan", footer);
-  const handlePDF = () => exportToPDF("Laporan Keuangan", headers, rows, "laporan_keuangan", footer);
+  const handleExcel = () => exportToExcel("Laporan Keuangan", headersV2, rows, "laporan_keuangan", footer);
+  const handlePDF = () => exportToPDF("Laporan Keuangan", headersV2, rows, "laporan_keuangan", footer);
 
   return (
     <div>
@@ -70,15 +70,17 @@ export default function LaporanKeuangan() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b text-left text-muted-foreground">
+                  <th className="pb-3 font-medium">Tipe</th>
                   <th className="pb-3 font-medium">Kode</th>
-                  <th className="pb-3 font-medium">Nama Layanan</th>
-                  <th className="pb-3 font-medium text-center">Jumlah Transaksi</th>
+                  <th className="pb-3 font-medium">Nama</th>
+                  <th className="pb-3 font-medium text-center">Jumlah</th>
                   <th className="pb-3 font-medium text-right">Total (Rp)</th>
                 </tr>
               </thead>
               <tbody>
                 {data.map((d) => (
-                  <tr key={d.kode} className="border-b last:border-0">
+                  <tr key={`${d.tipe || "X"}:${d.kode}`} className="border-b last:border-0">
+                    <td className="py-3">{d.tipe || "-"}</td>
                     <td className="py-3 font-medium">{d.kode}</td>
                     <td className="py-3">{d.nama}</td>
                     <td className="py-3 text-center">{d.jumlah}</td>
@@ -88,7 +90,7 @@ export default function LaporanKeuangan() {
               </tbody>
               <tfoot>
                 <tr className="border-t-2">
-                  <td colSpan={3} className="py-3 font-display font-bold text-right">Grand Total</td>
+                  <td colSpan={4} className="py-3 font-display font-bold text-right">Grand Total</td>
                   <td className="py-3 text-right font-display font-bold text-accent">{formatRp(grandTotal)}</td>
                 </tr>
               </tfoot>

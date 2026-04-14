@@ -12,13 +12,20 @@ const allMenus = [
   "Dashboard",
   "Master Pegawai",
   "Master Layanan",
+  "Master Produk",
+  "Customer / Member",
   "Input Booking",
   "Booked",
+  "Kasir / Pembayaran",
+  "Riwayat Transaksi",
   "Laporan Keuangan",
   "Laporan Pegawai",
+  "Laporan Stok",
+  "Mutasi Stok",
   "Data User",
   "Hak Akses User",
   "Setting Komisi",
+  "Setting Loyalty",
 ];
 
 export default function HakAkses() {

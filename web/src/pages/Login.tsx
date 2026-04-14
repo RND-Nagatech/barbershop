@@ -23,7 +23,9 @@ export default function Login() {
     }
     try {
       setLoading(true);
-      await api.login(username, password);
+      const payload = await api.login(username, password);
+      localStorage.setItem("auth_token", payload.token);
+      localStorage.setItem("auth_user", JSON.stringify(payload.user));
       toast({ title: "Berhasil", description: "Login berhasil!" });
       navigate("/dashboard");
     } catch (error) {

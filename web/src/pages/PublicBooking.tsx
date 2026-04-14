@@ -4,16 +4,14 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "@/hooks/use-toast";
-import { api, type BookingItem, type Branch, type Employee, type Service } from "@/lib/api";
+import { api, type BookingItem, type Branch, type Service } from "@/lib/api";
 
 export default function PublicBooking() {
   const [searchParams] = useSearchParams();
   const domainParam = searchParams.get("domain")?.trim() || "";
   const [branch, setBranch] = useState<Branch | null>(null);
-  const [employees, setEmployees] = useState<Employee[]>([]);
   const [services, setServices] = useState<Service[]>([]);
   const [loading, setLoading] = useState(true);
   const [created, setCreated] = useState<BookingItem | null>(null);
@@ -21,7 +19,6 @@ export default function PublicBooking() {
   const [form, setForm] = useState({
     namaCustomer: "",
     noHp: "",
-    pegawai: "",
   });
   const [selectedServices, setSelectedServices] = useState<string[]>([]);
 
@@ -33,13 +30,11 @@ export default function PublicBooking() {
       }
 
       try {
-        const [branchRow, employeeRows, serviceRows] = await Promise.all([
+        const [branchRow, serviceRows] = await Promise.all([
           api.getBranchByDomain(domainParam),
-          api.getEmployees(),
           api.getServices(),
         ]);
         setBranch(branchRow);
-        setEmployees(employeeRows);
         setServices(serviceRows);
       } catch (error) {
         toast({
@@ -66,7 +61,7 @@ export default function PublicBooking() {
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
 
-    if (!form.namaCustomer || !form.pegawai || selectedServices.length === 0) {
+    if (!form.namaCustomer || selectedServices.length === 0) {
       toast({ title: "Error", description: "Lengkapi semua data booking", variant: "destructive" });
       return;
     }
@@ -79,7 +74,6 @@ export default function PublicBooking() {
       const booking = await api.createBooking({
         customerName: form.namaCustomer,
         phone: form.noHp,
-        employeeName: form.pegawai,
         services: selected,
         branchDomain: domainParam,
       });
@@ -101,7 +95,7 @@ export default function PublicBooking() {
 
   const resetForm = () => {
     setCreated(null);
-    setForm({ namaCustomer: "", noHp: "", pegawai: "" });
+    setForm({ namaCustomer: "", noHp: "" });
     setSelectedServices([]);
   };
 

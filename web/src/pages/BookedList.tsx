@@ -14,10 +14,11 @@ import { PageHeader } from "@/components/PageHeader";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CheckCircle } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
-import { api, type BookingItem, type Employee } from "@/lib/api";
+import { api, type BookingItem, type Employee, type Service } from "@/lib/api";
 import { formatLocalYmd } from "@/lib/date";
 
 function getToday() {
@@ -27,6 +28,7 @@ function getToday() {
 export default function BookedList() {
   const [data, setData] = useState<BookingItem[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [services, setServices] = useState<Service[]>([]);
   const [from, setFrom] = useState(getToday());
   const [to, setTo] = useState(getToday());
   const [status, setStatus] = useState("Menunggu");
@@ -39,6 +41,7 @@ export default function BookedList() {
       ]);
       setData(bookings);
       setEmployees(employeeRows);
+      if (services.length === 0) setServices(await api.getServices());
     } catch (error) {
       toast({
         title: "Gagal memuat data",
@@ -55,6 +58,8 @@ export default function BookedList() {
 
   const [assignTarget, setAssignTarget] = useState<{ id: string; pegawai: string } | null>(null);
   const [completeTarget, setCompleteTarget] = useState<string | null>(null);
+  const [addServiceTarget, setAddServiceTarget] = useState<string | null>(null);
+  const [selectedService, setSelectedService] = useState("");
 
   const handleAssign = async () => {
     if (!assignTarget) return;
@@ -87,6 +92,24 @@ export default function BookedList() {
       });
     } finally {
       setCompleteTarget(null);
+    }
+  };
+
+  const handleAddService = async () => {
+    if (!addServiceTarget || !selectedService) return;
+    try {
+      await api.addServiceToBooking(addServiceTarget, selectedService);
+      await loadData();
+      toast({ title: "Berhasil", description: "Layanan ditambahkan ke booking" });
+    } catch (error) {
+      toast({
+        title: "Gagal menambah layanan",
+        description: error instanceof Error ? error.message : "Terjadi kesalahan",
+        variant: "destructive",
+      });
+    } finally {
+      setAddServiceTarget(null);
+      setSelectedService("");
     }
   };
 
@@ -174,6 +197,14 @@ export default function BookedList() {
               {b.status === "Proses" && (
                 <div className="space-y-2">
                   <p className="text-sm"><span className="text-muted-foreground">Pegawai:</span> <span className="font-medium">{b.employeeName}</span></p>
+                  <Button
+                    onClick={() => setAddServiceTarget(b.id)}
+                    className="w-full"
+                    variant="outline"
+                    size="sm"
+                  >
+                    Tambah Layanan
+                  </Button>
                   <Button onClick={() => setCompleteTarget(b.id)} className="w-full bg-success text-success-foreground hover:bg-success/90" size="sm">
                     <CheckCircle className="w-4 h-4 mr-2" /> Selesai
                   </Button>
@@ -193,7 +224,20 @@ export default function BookedList() {
               )}
 
               {b.status === "Selesai" && (
-                <p className="text-sm text-muted-foreground">Dikerjakan oleh: <span className="font-medium text-foreground">{b.employeeName || "-"}</span></p>
+                <div className="space-y-1">
+                  <p className="text-sm text-muted-foreground">
+                    Dikerjakan oleh: <span className="font-medium text-foreground">{b.employeeName || "-"}</span>
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                        b.paymentStatus === "Paid" ? "bg-success/10 text-success" : "bg-warning/10 text-warning"
+                      }`}
+                    >
+                      {b.paymentStatus === "Paid" ? "Lunas" : "Belum bayar"}
+                    </span>
+                  </div>
+                </div>
               )}
             </CardContent>
           </Card>
@@ -204,6 +248,29 @@ export default function BookedList() {
           </Card>
         )}
       </div>
+
+      <Dialog open={!!addServiceTarget} onOpenChange={(open) => (!open ? setAddServiceTarget(null) : null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="font-display">Tambah Layanan</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <Select value={selectedService} onValueChange={setSelectedService}>
+              <SelectTrigger><SelectValue placeholder="Pilih layanan..." /></SelectTrigger>
+              <SelectContent>
+                {services.map((s) => (
+                  <SelectItem key={s.id} value={s.kode}>
+                    {s.nama} ({s.kode})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button onClick={handleAddService} disabled={!selectedService} className="w-full bg-accent text-accent-foreground hover:bg-accent/90">
+              Tambahkan
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

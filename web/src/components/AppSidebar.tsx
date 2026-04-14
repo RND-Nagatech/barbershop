@@ -1,11 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   LayoutDashboard,
+  Layers,
+  PackageSearch,
+  BarChart3,
+  UsersRound,
+  Settings2,
   Users,
   Scissors,
+  ShoppingBag,
+  ContactRound,
   CalendarPlus,
   ClipboardList,
   FileText,
+  CreditCard,
+  ReceiptText,
+  Boxes,
   UserCog,
   Shield,
   Settings,
@@ -32,37 +42,49 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { getAuthUser } from "@/lib/api";
 
 const menuGroups = [
   {
     label: "Menu Utama",
+    icon: Layers,
     items: [
       { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
     ],
   },
   {
     label: "Master Data",
+    icon: PackageSearch,
     items: [
       { title: "Master Pegawai", url: "/master/pegawai", icon: Users },
       { title: "Master Layanan", url: "/master/layanan", icon: Scissors },
+      { title: "Master Produk", url: "/master/produk", icon: ShoppingBag },
+      { title: "Customer / Member", url: "/customer", icon: ContactRound },
     ],
   },
   {
-    label: "Booking",
+    label: "Transaksi",
+    icon: CreditCard,
     items: [
       { title: "Input Booking", url: "/booking/input", icon: CalendarPlus },
       { title: "Booked", url: "/booking/list", icon: ClipboardList },
+      { title: "Kasir / Pembayaran", url: "/kasir/pembayaran", icon: CreditCard },
+      { title: "Riwayat Transaksi", url: "/transaksi/riwayat", icon: ReceiptText },
     ],
   },
   {
     label: "Laporan",
+    icon: BarChart3,
     items: [
       { title: "Laporan Keuangan", url: "/laporan/keuangan", icon: FileText },
       { title: "Laporan Pegawai", url: "/laporan/pegawai", icon: FileText },
+      { title: "Laporan Stok", url: "/laporan/stok", icon: Boxes },
+      { title: "Mutasi Stok", url: "/laporan/mutasi-stok", icon: Boxes },
     ],
   },
   {
     label: "Manage User",
+    icon: UsersRound,
     items: [
       { title: "Data User", url: "/user/data", icon: UserCog },
       { title: "Hak Akses User", url: "/user/akses", icon: Shield },
@@ -70,18 +92,28 @@ const menuGroups = [
   },
   {
     label: "Setting",
+    icon: Settings2,
     items: [
       { title: "Setting Komisi", url: "/setting/komisi", icon: Settings },
+      { title: "Setting Loyalty", url: "/setting/loyalty", icon: Settings },
       { title: "Data Cabang", url: "/setting/cabang", icon: Settings },
     ],
   },
 ];
+
+function getAllowedTitles() {
+  const user = getAuthUser();
+  if (!user) return null;
+  if (user.level === "Owner" || user.level === "Admin") return null;
+  return new Set(user.menuAccess || []);
+}
 
 export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
   const location = useLocation();
   const navigate = useNavigate();
+  const allowedTitles = useMemo(() => getAllowedTitles(), []);
   const activeGroupLabel = useMemo(() => {
     const activeGroup = menuGroups.find((group) =>
       group.items.some((item) => location.pathname.startsWith(item.url)),
@@ -113,7 +145,15 @@ export function AppSidebar() {
       </SidebarHeader>
 
       <SidebarContent className="px-2 py-2">
-        {menuGroups.map((group) => {
+        {menuGroups
+          .map((group) => {
+            const allowedItems = allowedTitles
+              ? group.items.filter((i) => allowedTitles.has(i.title) || i.url === "/dashboard")
+              : group.items;
+            return { ...group, items: allowedItems };
+          })
+          .filter((group) => group.items.length > 0)
+          .map((group) => {
           const isOpen = openGroup === group.label;
           
           if (group.items.length === 1) {
@@ -146,10 +186,13 @@ export function AppSidebar() {
             >
               <SidebarGroup>
                 <CollapsibleTrigger className="w-full">
-                  <SidebarGroupLabel className="flex items-center justify-between cursor-pointer text-sidebar-foreground/50 hover:text-sidebar-foreground/80 transition-colors">
-                    {!collapsed && <span>{group.label}</span>}
-                    {!collapsed && <ChevronDown className="w-3 h-3" />}
-                  </SidebarGroupLabel>
+                  <SidebarGroupLabel className="h-9 px-3 text-sm font-medium flex items-center justify-between cursor-pointer text-sidebar-foreground/80 hover:text-sidebar-foreground hover:bg-sidebar-accent/30 transition-colors">
+                    <div className="flex items-center gap-2">
+                      {group.icon && <group.icon className="w-4 h-4 shrink-0" />}
+                      {!collapsed && <span>{group.label}</span>}
+                    </div>
+                      {!collapsed && <ChevronDown className="w-3 h-3" />}
+                    </SidebarGroupLabel>
                 </CollapsibleTrigger>
                 <CollapsibleContent>
                   <SidebarGroupContent>
@@ -159,7 +202,7 @@ export function AppSidebar() {
                           <SidebarMenuButton asChild>
                             <NavLink
                               to={item.url}
-                              className="flex items-center gap-3 px-3 py-2 rounded-md text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
+                              className={`flex items-center gap-3 ${collapsed ? "px-3" : "pl-9 pr-3"} py-2 rounded-md text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors`}
                               activeClassName="bg-sidebar-accent text-sidebar-primary font-medium"
                             >
                               <item.icon className="w-4 h-4 shrink-0" />
@@ -181,7 +224,11 @@ export function AppSidebar() {
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton
-              onClick={() => navigate("/")}
+              onClick={() => {
+                localStorage.removeItem("auth_token");
+                localStorage.removeItem("auth_user");
+                navigate("/");
+              }}
               className="flex items-center gap-3 px-3 py-2 rounded-md text-sidebar-foreground hover:bg-destructive/20 hover:text-destructive transition-colors cursor-pointer"
             >
               <LogOut className="w-4 h-4 shrink-0" />
