@@ -7,6 +7,7 @@ import { DateRangeFilter } from "@/components/DateRangeFilter";
 import { exportToExcel, exportToPDF } from "@/lib/exportUtils";
 import { api, type FinanceRow } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
+import { formatLocalYmd } from "@/lib/date";
 
 const formatRp = (n: number) =>
   new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(n);
@@ -23,8 +24,8 @@ export default function LaporanKeuangan() {
       try {
         setData(
           await api.getFinanceReport({
-            from: from ? from.toISOString() : undefined,
-            to: to ? to.toISOString() : undefined,
+            from: formatLocalYmd(from),
+            to: formatLocalYmd(to),
           }),
         );
       } catch (error) {

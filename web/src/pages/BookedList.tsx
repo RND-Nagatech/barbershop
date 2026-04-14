@@ -1,4 +1,15 @@
 import { useEffect, useState } from "react";
+import { Input } from "@/components/ui/input";
+import {
+  AlertDialog,
+  AlertDialogTrigger,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogFooter,
+  AlertDialogAction,
+  AlertDialogCancel,
+} from "@/components/ui/alert-dialog";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -7,14 +18,25 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { CheckCircle } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { api, type BookingItem, type Employee } from "@/lib/api";
+import { formatLocalYmd } from "@/lib/date";
+
+function getToday() {
+  return formatLocalYmd(new Date()) ?? "";
+}
 
 export default function BookedList() {
   const [data, setData] = useState<BookingItem[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [from, setFrom] = useState(getToday());
+  const [to, setTo] = useState(getToday());
+  const [status, setStatus] = useState("Menunggu");
 
   const loadData = async () => {
     try {
-      const [bookings, employeeRows] = await Promise.all([api.getBookings(), api.getEmployees()]);
+      const [bookings, employeeRows] = await Promise.all([
+        api.getBookings({ from, to, status }),
+        api.getEmployees(),
+      ]);
       setData(bookings);
       setEmployees(employeeRows);
     } catch (error) {
@@ -28,25 +50,33 @@ export default function BookedList() {
 
   useEffect(() => {
     void loadData();
-  }, []);
+    // eslint-disable-next-line
+  }, [from, to, status]);
 
-  const handleAssign = async (id: string, pegawai: string) => {
+  const [assignTarget, setAssignTarget] = useState<{ id: string; pegawai: string } | null>(null);
+  const [completeTarget, setCompleteTarget] = useState<string | null>(null);
+
+  const handleAssign = async () => {
+    if (!assignTarget) return;
     try {
-      await api.assignBooking(id, pegawai);
+      await api.assignBooking(assignTarget.id, assignTarget.pegawai);
       await loadData();
-      toast({ title: "Berhasil", description: `Booking berhasil di-assign ke ${pegawai}` });
+      toast({ title: "Berhasil", description: `Booking berhasil di-assign ke ${assignTarget.pegawai}` });
     } catch (error) {
       toast({
         title: "Gagal assign booking",
         description: error instanceof Error ? error.message : "Terjadi kesalahan",
         variant: "destructive",
       });
+    } finally {
+      setAssignTarget(null);
     }
   };
 
-  const handleComplete = async (id: string) => {
+  const handleComplete = async () => {
+    if (!completeTarget) return;
     try {
-      await api.completeBooking(id);
+      await api.completeBooking(completeTarget);
       await loadData();
       toast({ title: "Berhasil", description: "Booking selesai" });
     } catch (error) {
@@ -55,6 +85,8 @@ export default function BookedList() {
         description: error instanceof Error ? error.message : "Terjadi kesalahan",
         variant: "destructive",
       });
+    } finally {
+      setCompleteTarget(null);
     }
   };
 
@@ -67,6 +99,27 @@ export default function BookedList() {
   return (
     <div>
       <PageHeader title="Booked" description="Kelola antrian booking yang masuk" />
+      <div className="flex flex-wrap gap-2 mb-4 items-end">
+        <div>
+          <label className="block text-xs mb-1">Dari</label>
+          <Input type="date" value={from} onChange={e => setFrom(e.target.value)} className="w-36" autoUppercase={false} />
+        </div>
+        <div>
+          <label className="block text-xs mb-1">Sampai</label>
+          <Input type="date" value={to} onChange={e => setTo(e.target.value)} className="w-36" autoUppercase={false} />
+        </div>
+        <div>
+          <label className="block text-xs mb-1">Status</label>
+          <Select value={status} onValueChange={setStatus}>
+            <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="Menunggu">Menunggu</SelectItem>
+              <SelectItem value="Proses">Proses</SelectItem>
+              <SelectItem value="Selesai">Selesai</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {data.map((b) => (
@@ -94,22 +147,48 @@ export default function BookedList() {
               </div>
 
               {b.status === "Menunggu" && (
-                <Select onValueChange={(v) => handleAssign(b.id, v)}>
-                  <SelectTrigger className="text-sm"><SelectValue placeholder="Assign pegawai..." /></SelectTrigger>
-                  <SelectContent>
-                    {employees.map((employee) => (
-                      <SelectItem key={employee.id} value={employee.nama}>{employee.nama}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <>
+                  <Select onValueChange={(v) => setAssignTarget({ id: b.id, pegawai: v })}>
+                    <SelectTrigger className="text-sm"><SelectValue placeholder="Assign pegawai..." /></SelectTrigger>
+                    <SelectContent>
+                      {employees.map((employee) => (
+                        <SelectItem key={employee.id} value={employee.nama}>{employee.nama}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <AlertDialog open={!!assignTarget && assignTarget?.id === b.id} onOpenChange={(open) => !open && setAssignTarget(null)}>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Proses booking?</AlertDialogTitle>
+                      </AlertDialogHeader>
+                      <div>Booking akan diproses oleh pegawai <b>{assignTarget?.pegawai}</b>. Lanjutkan?</div>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Batal</AlertDialogCancel>
+                        <AlertDialogAction onClick={handleAssign}>Ya, proses</AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                </>
               )}
 
               {b.status === "Proses" && (
                 <div className="space-y-2">
                   <p className="text-sm"><span className="text-muted-foreground">Pegawai:</span> <span className="font-medium">{b.employeeName}</span></p>
-                  <Button onClick={() => handleComplete(b.id)} className="w-full bg-success text-success-foreground hover:bg-success/90" size="sm">
+                  <Button onClick={() => setCompleteTarget(b.id)} className="w-full bg-success text-success-foreground hover:bg-success/90" size="sm">
                     <CheckCircle className="w-4 h-4 mr-2" /> Selesai
                   </Button>
+                  <AlertDialog open={completeTarget === b.id} onOpenChange={(open) => !open && setCompleteTarget(null)}>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Selesaikan booking?</AlertDialogTitle>
+                      </AlertDialogHeader>
+                      <div>Booking akan diselesaikan. Lanjutkan?</div>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Batal</AlertDialogCancel>
+                        <AlertDialogAction onClick={handleComplete}>Ya, selesai</AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                 </div>
               )}
 

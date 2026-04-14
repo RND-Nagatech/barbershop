@@ -14,7 +14,7 @@ if (!mongoUri) {
 
 app.use(
   cors({
-    origin: process.env.CORS_ORIGIN?.split(",") || "*",
+    origin: '*',
   }),
 );
 app.use(express.json());
@@ -42,6 +42,7 @@ const branchSchema = new mongoose.Schema(
     nama: { type: String, required: true, trim: true },
     alamat: { type: String, required: true, trim: true },
     noHp: { type: String, required: true, trim: true },
+    domain: { type: String, required: true, unique: true, trim: true, lowercase: true },
   },
   { timestamps: true },
 );
@@ -64,6 +65,15 @@ const commissionSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+const queueCounterSchema = new mongoose.Schema(
+  {
+    date: { type: String, required: true, trim: true },
+    seq: { type: Number, required: true, default: 0, min: 0 },
+  },
+  { timestamps: true },
+);
+queueCounterSchema.index({ date: 1 }, { unique: true });
+
 const bookingServiceSchema = new mongoose.Schema(
   {
     kode: { type: String, required: true },
@@ -75,26 +85,31 @@ const bookingServiceSchema = new mongoose.Schema(
 
 const bookingSchema = new mongoose.Schema(
   {
-    bookingCode: { type: String, required: true, unique: true },
+    bookingCode: { type: String, required: true, trim: true },
     antrian: { type: Number, required: true },
     customerName: { type: String, required: true, trim: true },
     phone: { type: String, default: "" },
     employeeName: { type: String, default: "" },
+    branchId: { type: mongoose.Schema.Types.ObjectId, ref: "Branch" },
+    branchDomain: { type: String, trim: true },
     services: { type: [bookingServiceSchema], default: [] },
     status: {
       type: String,
       enum: ["Menunggu", "Proses", "Selesai"],
       default: "Menunggu",
     },
+    tgl_system: { type: String, required: true },
   },
   { timestamps: true },
 );
+bookingSchema.index({ tgl_system: 1, bookingCode: 1 }, { unique: true });
 
 const Employee = mongoose.model("Employee", employeeSchema);
 const Service = mongoose.model("Service", serviceSchema);
 const Branch = mongoose.model("Branch", branchSchema);
 const User = mongoose.model("User", userSchema);
 const CommissionSetting = mongoose.model("CommissionSetting", commissionSchema);
+const QueueCounter = mongoose.model("QueueCounter", queueCounterSchema);
 const Booking = mongoose.model("Booking", bookingSchema);
 
 const asyncHandler = (fn) => async (req, res, next) => {
@@ -103,6 +118,15 @@ const asyncHandler = (fn) => async (req, res, next) => {
   } catch (err) {
     next(err);
   }
+};
+
+const normalizeDomain = (value) => {
+  if (!value || typeof value !== "string") return "";
+  return value
+    .trim()
+    .replace(/^https?:\/\//i, "")
+    .replace(/\/+$/, "")
+    .toLowerCase();
 };
 
 const toObjectId = (value) => {
@@ -122,6 +146,20 @@ const parseDateRange = (from, to) => {
     }
   }
   return query;
+};
+
+const formatJakartaYmd = (date = new Date()) =>
+  new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+
+const formatBookingCode = ({ queueDate, antrian }) => {
+  const yymmdd = String(queueDate || "").replace(/-/g, "").slice(2);
+  const seq = String(antrian).padStart(3, "0");
+  return `BK-${yymmdd}-${seq}`;
 };
 
 app.get("/api/health", (_, res) => {
@@ -232,15 +270,28 @@ app.get(
   "/api/branches",
   asyncHandler(async (_, res) => {
     const rows = await Branch.find().sort({ createdAt: -1 }).lean();
-    res.json(rows.map((r) => ({ id: String(r._id), nama: r.nama, alamat: r.alamat, noHp: r.noHp })));
+    res.json(rows.map((r) => ({ id: String(r._id), nama: r.nama, alamat: r.alamat, noHp: r.noHp, domain: r.domain })));
   }),
 );
 
 app.post(
   "/api/branches",
   asyncHandler(async (req, res) => {
-    const created = await Branch.create(req.body);
-    res.status(201).json({ id: String(created._id), nama: created.nama, alamat: created.alamat, noHp: created.noHp });
+    const domain = normalizeDomain(req.body?.domain);
+    if (!domain) return res.status(400).json({ message: "Domain cabang wajib diisi" });
+    const created = await Branch.create({
+      nama: req.body?.nama,
+      alamat: req.body?.alamat,
+      noHp: req.body?.noHp,
+      domain,
+    });
+    res.status(201).json({
+      id: String(created._id),
+      nama: created.nama,
+      alamat: created.alamat,
+      noHp: created.noHp,
+      domain: created.domain,
+    });
   }),
 );
 
@@ -249,9 +300,32 @@ app.put(
   asyncHandler(async (req, res) => {
     const _id = toObjectId(req.params.id);
     if (!_id) return res.status(400).json({ message: "ID tidak valid" });
-    const updated = await Branch.findByIdAndUpdate(_id, req.body, { new: true, runValidators: true }).lean();
+    const domain = normalizeDomain(req.body?.domain);
+    if (!domain) return res.status(400).json({ message: "Domain cabang wajib diisi" });
+    const updated = await Branch.findByIdAndUpdate(
+      _id,
+      { ...req.body, domain },
+      { new: true, runValidators: true },
+    ).lean();
     if (!updated) return res.status(404).json({ message: "Data tidak ditemukan" });
-    res.json({ id: String(updated._id), nama: updated.nama, alamat: updated.alamat, noHp: updated.noHp });
+    res.json({
+      id: String(updated._id),
+      nama: updated.nama,
+      alamat: updated.alamat,
+      noHp: updated.noHp,
+      domain: updated.domain,
+    });
+  }),
+);
+
+app.get(
+  "/api/branches/by-domain",
+  asyncHandler(async (req, res) => {
+    const domain = normalizeDomain(req.query.domain);
+    if (!domain) return res.status(400).json({ message: "Domain cabang tidak valid" });
+    const row = await Branch.findOne({ domain }).lean();
+    if (!row) return res.status(404).json({ message: "Cabang tidak ditemukan" });
+    res.json({ id: String(row._id), nama: row.nama, alamat: row.alamat, noHp: row.noHp, domain: row.domain });
   }),
 );
 
@@ -380,8 +454,19 @@ app.put(
 app.get(
   "/api/bookings",
   asyncHandler(async (req, res) => {
-    const query = parseDateRange(req.query.from, req.query.to);
+    const query = {};
+    if (req.query.from && req.query.to) {
+      query.tgl_system = { $gte: req.query.from, $lte: req.query.to };
+    } else if (req.query.from) {
+      query.tgl_system = { $gte: req.query.from };
+    } else if (req.query.to) {
+      query.tgl_system = { $lte: req.query.to };
+    }
     if (req.query.status) query.status = req.query.status;
+    if (req.query.branchDomain) {
+      const domain = normalizeDomain(req.query.branchDomain);
+      if (domain) query.branchDomain = domain;
+    }
     const rows = await Booking.find(query).sort({ createdAt: -1 }).lean();
     res.json(
       rows.map((r) => ({
@@ -391,6 +476,8 @@ app.get(
         customerName: r.customerName,
         phone: r.phone,
         employeeName: r.employeeName,
+        branchId: r.branchId ? String(r.branchId) : undefined,
+        branchDomain: r.branchDomain,
         services: r.services,
         status: r.status,
         createdAt: r.createdAt,
@@ -399,20 +486,45 @@ app.get(
   }),
 );
 
+app.get(
+  "/api/bookings/queue-preview",
+  asyncHandler(async (_req, res) => {
+    const queueDate = formatJakartaYmd();
+    const row = await QueueCounter.findOne({ date: queueDate }).lean();
+    const nextAntrian = (row?.seq || 0) + 1;
+    const nextBookingCode = formatBookingCode({ queueDate, antrian: nextAntrian });
+    res.json({ queueDate, nextAntrian, nextBookingCode });
+  }),
+);
+
 app.post(
   "/api/bookings",
   asyncHandler(async (req, res) => {
-    const last = await Booking.findOne().sort({ antrian: -1 }).lean();
-    const antrian = (last?.antrian || 0) + 1;
-    const bookingCode = `BK${String(antrian).padStart(3, "0")}`;
+    const branchDomain = normalizeDomain(req.body?.branchDomain);
+    let branch = null;
+    if (branchDomain) {
+      branch = await Branch.findOne({ domain: branchDomain }).lean();
+      if (!branch) return res.status(404).json({ message: "Cabang tidak ditemukan" });
+    }
+    const queueDate = formatJakartaYmd();
+    const counter = await QueueCounter.findOneAndUpdate(
+      { date: queueDate },
+      { $inc: { seq: 1 }, $setOnInsert: { date: queueDate } },
+      { new: true, upsert: true },
+    ).lean();
+    const antrian = counter.seq;
+    const bookingCode = formatBookingCode({ queueDate, antrian });
     const payload = {
       bookingCode,
       antrian,
       customerName: req.body.customerName,
       phone: req.body.phone || "",
-      employeeName: req.body.employeeName || "",
+      employeeName: "",
+      branchId: branch?._id,
+      branchDomain: branch?.domain,
       services: req.body.services || [],
-      status: req.body.employeeName ? "Proses" : "Menunggu",
+      status: "Menunggu",
+      tgl_system: queueDate,
     };
     const created = await Booking.create(payload);
     res.status(201).json({
@@ -422,6 +534,8 @@ app.post(
       customerName: created.customerName,
       phone: created.phone,
       employeeName: created.employeeName,
+      branchId: created.branchId ? String(created.branchId) : undefined,
+      branchDomain: created.branchDomain,
       services: created.services,
       status: created.status,
       createdAt: created.createdAt,
@@ -496,7 +610,15 @@ app.get(
 app.get(
   "/api/reports/finance",
   asyncHandler(async (req, res) => {
-    const match = parseDateRange(req.query.from, req.query.to);
+    const match = {};
+    if (req.query.from && req.query.to) {
+      // Pastikan filter to tetap inklusif (<= to)
+      match.tgl_system = { $gte: req.query.from, $lte: req.query.to };
+    } else if (req.query.from) {
+      match.tgl_system = { $gte: req.query.from };
+    } else if (req.query.to) {
+      match.tgl_system = { $lte: req.query.to };
+    }
     const rows = await Booking.aggregate([
       { $match: { ...match, status: "Selesai" } },
       { $unwind: "$services" },
@@ -525,7 +647,14 @@ app.get(
 app.get(
   "/api/reports/employees",
   asyncHandler(async (req, res) => {
-    const match = parseDateRange(req.query.from, req.query.to);
+    const match = {};
+    if (req.query.from && req.query.to) {
+      match.tgl_system = { $gte: req.query.from, $lte: req.query.to };
+    } else if (req.query.from) {
+      match.tgl_system = { $gte: req.query.from };
+    } else if (req.query.to) {
+      match.tgl_system = { $lte: req.query.to };
+    }
     match.status = "Selesai";
 
     const commission = (await CommissionSetting.findOne().lean()) || { tipe: "persentase", nilai: 15 };

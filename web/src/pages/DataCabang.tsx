@@ -15,7 +15,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Plus, Pencil, Trash2 } from "lucide-react";
+import { Plus, Pencil, Trash2, QrCode } from "lucide-react";
+import { QRCodeCanvas } from "qrcode.react";
 import { toast } from "@/hooks/use-toast";
 import { api, type Branch } from "@/lib/api";
 
@@ -23,8 +24,9 @@ export default function DataCabang() {
   const [data, setData] = useState<Branch[]>([]);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Branch | null>(null);
-  const [form, setForm] = useState({ nama: "", alamat: "", noHp: "" });
+  const [form, setForm] = useState({ nama: "", alamat: "", noHp: "", domain: "" });
   const [deleteTarget, setDeleteTarget] = useState<Branch | null>(null);
+  const [qrTarget, setQrTarget] = useState<Branch | null>(null);
 
   const loadBranches = async () => {
     try {
@@ -43,7 +45,7 @@ export default function DataCabang() {
   }, []);
 
   const handleSave = async () => {
-    if (!form.nama || !form.alamat || !form.noHp) {
+    if (!form.nama || !form.alamat || !form.noHp || !form.domain) {
       toast({ title: "Error", description: "Semua field harus diisi", variant: "destructive" });
       return;
     }
@@ -57,7 +59,7 @@ export default function DataCabang() {
         toast({ title: "Berhasil", description: "Cabang baru ditambahkan" });
       }
       await loadBranches();
-      setForm({ nama: "", alamat: "", noHp: "" });
+      setForm({ nama: "", alamat: "", noHp: "", domain: "" });
       setEditing(null);
       setOpen(false);
     } catch (error) {
@@ -91,14 +93,36 @@ export default function DataCabang() {
 
   const openEdit = (c: Branch) => {
     setEditing(c);
-    setForm({ nama: c.nama, alamat: c.alamat, noHp: c.noHp });
+    setForm({ nama: c.nama, alamat: c.alamat, noHp: c.noHp, domain: c.domain });
     setOpen(true);
   };
 
   const openAdd = () => {
     setEditing(null);
-    setForm({ nama: "", alamat: "", noHp: "" });
+    setForm({ nama: "", alamat: "", noHp: "", domain: "" });
     setOpen(true);
+  };
+
+  const buildBookingUrl = (domain: string) => {
+    // Jika domain sudah mengandung http/https, pakai langsung. Jika tidak, tambahkan http://
+    let base = domain.trim();
+    if (!/^https?:\/\//i.test(base)) {
+      base = `http://${base}`;
+    }
+    return `${base}/book?domain=${encodeURIComponent(domain)}`;
+  };
+
+  const copyQrUrl = async (domain: string) => {
+    try {
+      await navigator.clipboard.writeText(buildBookingUrl(domain));
+      toast({ title: "Berhasil", description: "Link booking disalin" });
+    } catch (error) {
+      toast({
+        title: "Gagal menyalin",
+        description: error instanceof Error ? error.message : "Terjadi kesalahan",
+        variant: "destructive",
+      });
+    }
   };
 
   return (
@@ -127,6 +151,17 @@ export default function DataCabang() {
                 <Label>No. HP</Label>
                 <Input value={form.noHp} onChange={(e) => setForm({ ...form, noHp: e.target.value })} placeholder="08xxxxxxxxxx" />
               </div>
+              <div className="space-y-2">
+                <Label>Domain Cabang</Label>
+                <Input
+                  value={form.domain}
+                  onChange={(e) => setForm({ ...form, domain: e.target.value.toLowerCase() })}
+                  placeholder="contoh: barberpro.id/kemang"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                />
+              </div>
               <Button onClick={handleSave} className="w-full bg-accent text-accent-foreground hover:bg-accent/90">Simpan</Button>
             </div>
           </DialogContent>
@@ -142,6 +177,7 @@ export default function DataCabang() {
                   <th className="pb-3 font-medium">Nama Cabang</th>
                   <th className="pb-3 font-medium">Alamat</th>
                   <th className="pb-3 font-medium">No. HP</th>
+                  <th className="pb-3 font-medium">Domain</th>
                   <th className="pb-3 font-medium text-right">Aksi</th>
                 </tr>
               </thead>
@@ -151,8 +187,12 @@ export default function DataCabang() {
                     <td className="py-3 font-medium">{c.nama}</td>
                     <td className="py-3">{c.alamat}</td>
                     <td className="py-3">{c.noHp}</td>
+                    <td className="py-3">{c.domain}</td>
                     <td className="py-3 text-right">
                       <div className="flex items-center justify-end gap-1">
+                        <Button variant="ghost" size="icon" onClick={() => setQrTarget(c)} title="QR Booking">
+                          <QrCode className="w-4 h-4" />
+                        </Button>
                         <Button variant="ghost" size="icon" onClick={() => openEdit(c)}><Pencil className="w-4 h-4" /></Button>
                         <Button variant="ghost" size="icon" onClick={() => setDeleteTarget(c)}><Trash2 className="w-4 h-4 text-destructive" /></Button>
                       </div>
@@ -161,7 +201,7 @@ export default function DataCabang() {
                 ))}
                 {data.length === 0 && (
                   <tr>
-                    <td colSpan={4} className="py-6 text-center text-muted-foreground">
+                    <td colSpan={5} className="py-6 text-center text-muted-foreground">
                       Belum ada data cabang.
                     </td>
                   </tr>
@@ -188,6 +228,28 @@ export default function DataCabang() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog open={!!qrTarget} onOpenChange={(nextOpen) => (!nextOpen ? setQrTarget(null) : null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="font-display">QR Booking Cabang</DialogTitle>
+          </DialogHeader>
+          {qrTarget && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-center rounded-lg border p-4">
+                <QRCodeCanvas value={buildBookingUrl(qrTarget.domain)} size={220} />
+              </div>
+              <div className="space-y-2">
+                <Label>Link Booking</Label>
+                <div className="flex items-center gap-2">
+                  <Input value={buildBookingUrl(qrTarget.domain)} readOnly />
+                  <Button variant="outline" onClick={() => copyQrUrl(qrTarget.domain)}>Copy</Button>
+                </div>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

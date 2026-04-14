@@ -17,6 +17,7 @@ import HakAkses from "./pages/HakAkses";
 import SettingKomisi from "./pages/SettingKomisi";
 import DataCabang from "./pages/DataCabang";
 import NotFound from "./pages/NotFound";
+import PublicBooking from "./pages/PublicBooking";
 
 const queryClient = new QueryClient();
 
@@ -28,6 +29,7 @@ const App = () => (
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Login />} />
+          <Route path="/book" element={<PublicBooking />} />
           <Route element={<AppLayout />}>
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/master/pegawai" element={<MasterPegawai />} />

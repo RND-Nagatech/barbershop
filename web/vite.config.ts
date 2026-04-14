@@ -11,6 +11,13 @@ export default defineConfig(({ mode }) => ({
     hmr: {
       overlay: false,
     },
+    // SPA fallback agar route apapun diarahkan ke index.html
+    middlewareMode: false,
+    fs: { allow: ["."] },
+    historyApiFallback: true,
+    proxy: {
+      '/api': 'http://192.168.110.190:3001',
+    },
   },
   plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),
   resolve: {

@@ -41,6 +41,7 @@ export interface Branch {
   nama: string;
   alamat: string;
   noHp: string;
+  domain: string;
 }
 
 export interface UserItem {
@@ -63,6 +64,8 @@ export interface BookingItem {
   customerName: string;
   phone: string;
   employeeName: string;
+  branchId?: string;
+  branchDomain?: string;
   services: BookingService[];
   status: "Menunggu" | "Proses" | "Selesai";
   createdAt: string;
@@ -99,6 +102,12 @@ export interface EmployeeReportRow {
   komisi: number;
 }
 
+export interface QueuePreview {
+  queueDate: string;
+  nextAntrian: number;
+  nextBookingCode: string;
+}
+
 export interface CommissionSetting {
   id: string;
   tipe: "persentase" | "rupiah";
@@ -122,6 +131,11 @@ export const api = {
   createBranch: (payload: Omit<Branch, "id">) => request<Branch>("/branches", "POST", payload),
   updateBranch: (id: string, payload: Omit<Branch, "id">) => request<Branch>(`/branches/${id}`, "PUT", payload),
   deleteBranch: (id: string) => request<void>(`/branches/${id}`, "DELETE"),
+  getBranchByDomain: (domain: string) => {
+    const query = new URLSearchParams();
+    query.set("domain", domain);
+    return request<Branch>(`/branches/by-domain?${query.toString()}`);
+  },
 
   getUsers: () => request<UserItem[]>("/users"),
   createUser: (payload: { username: string; password: string; level: string }) => request<UserItem>("/users", "POST", payload),
@@ -134,15 +148,17 @@ export const api = {
   getCommissionSetting: () => request<CommissionSetting>("/settings/commission"),
   updateCommissionSetting: (payload: { tipe: "persentase" | "rupiah"; nilai: number }) => request<CommissionSetting>("/settings/commission", "PUT", payload),
 
-  getBookings: (params?: { from?: string; to?: string; status?: string }) => {
+  getBookings: (params?: { from?: string; to?: string; status?: string; branchDomain?: string }) => {
     const query = new URLSearchParams();
     if (params?.from) query.set("from", params.from);
     if (params?.to) query.set("to", params.to);
     if (params?.status) query.set("status", params.status);
+    if (params?.branchDomain) query.set("branchDomain", params.branchDomain);
     const suffix = query.toString() ? `?${query.toString()}` : "";
     return request<BookingItem[]>(`/bookings${suffix}`);
   },
-  createBooking: (payload: { customerName: string; phone: string; employeeName?: string; services: BookingService[] }) =>
+  getQueuePreview: () => request<QueuePreview>("/bookings/queue-preview"),
+  createBooking: (payload: { customerName: string; phone: string; employeeName?: string; services: BookingService[]; branchDomain?: string }) =>
     request<BookingItem>("/bookings", "POST", payload),
   assignBooking: (id: string, employeeName: string) => request(`/bookings/${id}/assign`, "PATCH", { employeeName }),
   completeBooking: (id: string) => request(`/bookings/${id}/complete`, "PATCH"),

@@ -23,15 +23,14 @@ export default function InputBooking() {
   useEffect(() => {
     const load = async () => {
       try {
-        const [employeeRows, serviceRows, bookingRows] = await Promise.all([
+        const [employeeRows, serviceRows, preview] = await Promise.all([
           api.getEmployees(),
           api.getServices(),
-          api.getBookings(),
+          api.getQueuePreview(),
         ]);
         setEmployees(employeeRows);
         setLayananList(serviceRows);
-        const current = bookingRows.length > 0 ? Math.max(...bookingRows.map((b) => b.antrian)) + 1 : 1;
-        setAntrian(current);
+        setAntrian(preview.nextAntrian);
       } catch (error) {
         toast({
           title: "Gagal memuat data",
@@ -50,7 +49,7 @@ export default function InputBooking() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.namaCustomer || !form.pegawai || selectedLayanan.length === 0) {
+    if (!form.namaCustomer || !selectedLayanan.length) {
       toast({ title: "Error", description: "Lengkapi semua data booking", variant: "destructive" });
       return;
     }
@@ -68,7 +67,7 @@ export default function InputBooking() {
       });
 
       toast({ title: "Berhasil", description: `Booking ${created.bookingCode} untuk ${form.namaCustomer} berhasil disimpan` });
-      setAntrian(created.antrian + 1);
+      setAntrian((await api.getQueuePreview()).nextAntrian);
       setForm({ namaCustomer: "", noHp: "", pegawai: "" });
       setSelectedLayanan([]);
     } catch (error) {
@@ -101,22 +100,12 @@ export default function InputBooking() {
                     <Input value={form.namaCustomer} onChange={(e) => setForm({ ...form, namaCustomer: e.target.value })} placeholder="Nama lengkap" />
                   </div>
                   <div className="space-y-2">
-                    <Label>No. HP</Label>
+                    <Label>No. HP/WA</Label>
                     <Input value={form.noHp} onChange={(e) => setForm({ ...form, noHp: e.target.value })} placeholder="08xxxxxxxxxx" />
                   </div>
                 </div>
 
-                <div className="space-y-2">
-                  <Label>Pegawai</Label>
-                  <Select value={form.pegawai} onValueChange={(v) => setForm({ ...form, pegawai: v })}>
-                    <SelectTrigger><SelectValue placeholder="Pilih pegawai" /></SelectTrigger>
-                    <SelectContent>
-                      {employees.map((employee) => (
-                        <SelectItem key={employee.id} value={employee.nama}>{employee.nama}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+                {/* Input pegawai disembunyikan, assign dilakukan di menu Booked */}
 
                 <div className="space-y-3">
                   <Label>Pilih Layanan</Label>
