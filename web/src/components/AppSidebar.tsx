@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from "react";
 import {
   LayoutDashboard,
   Users,
@@ -81,6 +82,19 @@ export function AppSidebar() {
   const collapsed = state === "collapsed";
   const location = useLocation();
   const navigate = useNavigate();
+  const activeGroupLabel = useMemo(() => {
+    const activeGroup = menuGroups.find((group) =>
+      group.items.some((item) => location.pathname.startsWith(item.url)),
+    );
+    return activeGroup?.label ?? "";
+  }, [location.pathname]);
+  const [openGroup, setOpenGroup] = useState(activeGroupLabel);
+
+  useEffect(() => {
+    if (activeGroupLabel) {
+      setOpenGroup(activeGroupLabel);
+    }
+  }, [activeGroupLabel]);
 
   return (
     <Sidebar collapsible="icon">
@@ -100,7 +114,7 @@ export function AppSidebar() {
 
       <SidebarContent className="px-2 py-2">
         {menuGroups.map((group) => {
-          const isActive = group.items.some((i) => location.pathname.startsWith(i.url));
+          const isOpen = openGroup === group.label;
           
           if (group.items.length === 1) {
             const item = group.items[0];
@@ -125,7 +139,11 @@ export function AppSidebar() {
           }
 
           return (
-            <Collapsible key={group.label} defaultOpen={isActive}>
+            <Collapsible
+              key={group.label}
+              open={isOpen}
+              onOpenChange={(nextOpen) => setOpenGroup(nextOpen ? group.label : "")}
+            >
               <SidebarGroup>
                 <CollapsibleTrigger className="w-full">
                   <SidebarGroupLabel className="flex items-center justify-between cursor-pointer text-sidebar-foreground/50 hover:text-sidebar-foreground/80 transition-colors">

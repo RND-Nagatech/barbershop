@@ -1,52 +1,95 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Plus, Pencil, Trash2 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
-
-interface Cabang {
-  id: string;
-  nama: string;
-  alamat: string;
-  noHp: string;
-}
+import { api, type Branch } from "@/lib/api";
 
 export default function DataCabang() {
-  const [data, setData] = useState<Cabang[]>([
-    { id: "1", nama: "BarberPro Pusat", alamat: "Jl. Sudirman No. 10, Jakarta", noHp: "081234567890" },
-    { id: "2", nama: "BarberPro Cabang Bandung", alamat: "Jl. Braga No. 25, Bandung", noHp: "081298765432" },
-  ]);
+  const [data, setData] = useState<Branch[]>([]);
   const [open, setOpen] = useState(false);
-  const [editing, setEditing] = useState<Cabang | null>(null);
+  const [editing, setEditing] = useState<Branch | null>(null);
   const [form, setForm] = useState({ nama: "", alamat: "", noHp: "" });
+  const [deleteTarget, setDeleteTarget] = useState<Branch | null>(null);
 
-  const handleSave = () => {
+  const loadBranches = async () => {
+    try {
+      setData(await api.getBranches());
+    } catch (error) {
+      toast({
+        title: "Gagal memuat data",
+        description: error instanceof Error ? error.message : "Terjadi kesalahan",
+        variant: "destructive",
+      });
+    }
+  };
+
+  useEffect(() => {
+    void loadBranches();
+  }, []);
+
+  const handleSave = async () => {
     if (!form.nama || !form.alamat || !form.noHp) {
       toast({ title: "Error", description: "Semua field harus diisi", variant: "destructive" });
       return;
     }
-    if (editing) {
-      setData(data.map((d) => (d.id === editing.id ? { ...editing, ...form } : d)));
-      toast({ title: "Berhasil", description: "Data cabang diperbarui" });
-    } else {
-      setData([...data, { id: Date.now().toString(), ...form }]);
-      toast({ title: "Berhasil", description: "Cabang baru ditambahkan" });
+
+    try {
+      if (editing) {
+        await api.updateBranch(editing.id, form);
+        toast({ title: "Berhasil", description: "Data cabang diperbarui" });
+      } else {
+        await api.createBranch(form);
+        toast({ title: "Berhasil", description: "Cabang baru ditambahkan" });
+      }
+      await loadBranches();
+      setForm({ nama: "", alamat: "", noHp: "" });
+      setEditing(null);
+      setOpen(false);
+    } catch (error) {
+      toast({
+        title: "Gagal menyimpan",
+        description: error instanceof Error ? error.message : "Terjadi kesalahan",
+        variant: "destructive",
+      });
     }
-    setForm({ nama: "", alamat: "", noHp: "" });
-    setEditing(null);
-    setOpen(false);
   };
 
-  const handleDelete = (id: string) => {
-    setData(data.filter((d) => d.id !== id));
-    toast({ title: "Berhasil", description: "Data cabang dihapus" });
+  const handleDelete = async (id: string) => {
+    try {
+      await api.deleteBranch(id);
+      await loadBranches();
+      toast({ title: "Berhasil", description: "Data cabang dihapus" });
+    } catch (error) {
+      toast({
+        title: "Gagal menghapus",
+        description: error instanceof Error ? error.message : "Terjadi kesalahan",
+        variant: "destructive",
+      });
+    }
   };
 
-  const openEdit = (c: Cabang) => {
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    await handleDelete(deleteTarget.id);
+    setDeleteTarget(null);
+  };
+
+  const openEdit = (c: Branch) => {
     setEditing(c);
     setForm({ nama: c.nama, alamat: c.alamat, noHp: c.noHp });
     setOpen(true);
@@ -111,16 +154,40 @@ export default function DataCabang() {
                     <td className="py-3 text-right">
                       <div className="flex items-center justify-end gap-1">
                         <Button variant="ghost" size="icon" onClick={() => openEdit(c)}><Pencil className="w-4 h-4" /></Button>
-                        <Button variant="ghost" size="icon" onClick={() => handleDelete(c.id)}><Trash2 className="w-4 h-4 text-destructive" /></Button>
+                        <Button variant="ghost" size="icon" onClick={() => setDeleteTarget(c)}><Trash2 className="w-4 h-4 text-destructive" /></Button>
                       </div>
                     </td>
                   </tr>
                 ))}
+                {data.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="py-6 text-center text-muted-foreground">
+                      Belum ada data cabang.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
         </CardContent>
       </Card>
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(nextOpen) => (!nextOpen ? setDeleteTarget(null) : null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Hapus cabang?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Cabang{deleteTarget ? ` "${deleteTarget.nama}"` : ""} akan dihapus permanen.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Batal</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Hapus
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

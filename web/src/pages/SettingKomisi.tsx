@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -6,20 +6,54 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { toast } from "@/hooks/use-toast";
+import { api } from "@/lib/api";
 
 export default function SettingKomisi() {
   const [tipe, setTipe] = useState<"persentase" | "rupiah">("persentase");
   const [nilai, setNilai] = useState("15");
+  const formatRupiahInput = (value: string) => {
+    const digits = value.replace(/\D/g, "");
+    if (!digits) return "";
+    return new Intl.NumberFormat("id-ID").format(Number(digits));
+  };
+  const sanitizeNumberInput = (value: string) => value.replace(/\D/g, "");
 
-  const handleSave = () => {
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const row = await api.getCommissionSetting();
+        setTipe(row.tipe);
+        setNilai(String(row.nilai));
+      } catch (error) {
+        toast({
+          title: "Gagal memuat setting",
+          description: error instanceof Error ? error.message : "Terjadi kesalahan",
+          variant: "destructive",
+        });
+      }
+    };
+
+    void load();
+  }, []);
+
+  const handleSave = async () => {
     if (!nilai) {
       toast({ title: "Error", description: "Nilai komisi harus diisi", variant: "destructive" });
       return;
     }
-    toast({
-      title: "Berhasil",
-      description: `Komisi disimpan: ${tipe === "persentase" ? `${nilai}%` : `Rp ${Number(nilai).toLocaleString("id-ID")}`}`,
-    });
+    try {
+      await api.updateCommissionSetting({ tipe, nilai: Number(nilai) });
+      toast({
+        title: "Berhasil",
+        description: `Komisi disimpan: ${tipe === "persentase" ? `${nilai}%` : `Rp ${Number(nilai).toLocaleString("id-ID")}`}`,
+      });
+    } catch (error) {
+      toast({
+        title: "Gagal menyimpan",
+        description: error instanceof Error ? error.message : "Terjadi kesalahan",
+        variant: "destructive",
+      });
+    }
   };
 
   return (
@@ -47,9 +81,10 @@ export default function SettingKomisi() {
             <div className="flex items-center gap-3">
               <div className="relative flex-1">
                 <Input
-                  type="number"
-                  value={nilai}
-                  onChange={(e) => setNilai(e.target.value)}
+                  type="text"
+                  inputMode="numeric"
+                  value={tipe === "rupiah" ? formatRupiahInput(nilai) : nilai}
+                  onChange={(e) => setNilai(sanitizeNumberInput(e.target.value))}
                   className="pr-12"
                   placeholder={tipe === "persentase" ? "15" : "50000"}
                 />

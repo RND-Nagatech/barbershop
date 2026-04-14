@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -7,37 +7,77 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "@/hooks/use-toast";
-
-const layananList = [
-  { kode: "LYN001", nama: "Haircut", harga: 50000 },
-  { kode: "LYN002", nama: "Shaving", harga: 30000 },
-  { kode: "LYN003", nama: "Hair Coloring", harga: 150000 },
-  { kode: "LYN004", nama: "Hair Wash", harga: 25000 },
-];
+import { api, type Employee, type Service } from "@/lib/api";
 
 export default function InputBooking() {
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [layananList, setLayananList] = useState<Service[]>([]);
   const [form, setForm] = useState({
     namaCustomer: "",
     noHp: "",
     pegawai: "",
   });
   const [selectedLayanan, setSelectedLayanan] = useState<string[]>([]);
-  const [antrian, setAntrian] = useState(1);
+  const [antrian, setAntrian] = useState(0);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const [employeeRows, serviceRows, bookingRows] = await Promise.all([
+          api.getEmployees(),
+          api.getServices(),
+          api.getBookings(),
+        ]);
+        setEmployees(employeeRows);
+        setLayananList(serviceRows);
+        const current = bookingRows.length > 0 ? Math.max(...bookingRows.map((b) => b.antrian)) + 1 : 1;
+        setAntrian(current);
+      } catch (error) {
+        toast({
+          title: "Gagal memuat data",
+          description: error instanceof Error ? error.message : "Terjadi kesalahan",
+          variant: "destructive",
+        });
+      }
+    };
+
+    void load();
+  }, []);
 
   const formatRp = (n: number) => new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(n);
 
   const total = layananList.filter((l) => selectedLayanan.includes(l.kode)).reduce((sum, l) => sum + l.harga, 0);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.namaCustomer || !form.pegawai || selectedLayanan.length === 0) {
       toast({ title: "Error", description: "Lengkapi semua data booking", variant: "destructive" });
       return;
     }
-    toast({ title: "Berhasil", description: `Booking #${antrian} untuk ${form.namaCustomer} berhasil disimpan` });
-    setAntrian(antrian + 1);
-    setForm({ namaCustomer: "", noHp: "", pegawai: "" });
-    setSelectedLayanan([]);
+
+    try {
+      const selectedServices = layananList
+        .filter((l) => selectedLayanan.includes(l.kode))
+        .map((l) => ({ kode: l.kode, nama: l.nama, harga: l.harga }));
+
+      const created = await api.createBooking({
+        customerName: form.namaCustomer,
+        phone: form.noHp,
+        employeeName: form.pegawai,
+        services: selectedServices,
+      });
+
+      toast({ title: "Berhasil", description: `Booking ${created.bookingCode} untuk ${form.namaCustomer} berhasil disimpan` });
+      setAntrian(created.antrian + 1);
+      setForm({ namaCustomer: "", noHp: "", pegawai: "" });
+      setSelectedLayanan([]);
+    } catch (error) {
+      toast({
+        title: "Gagal menyimpan booking",
+        description: error instanceof Error ? error.message : "Terjadi kesalahan",
+        variant: "destructive",
+      });
+    }
   };
 
   const toggleLayanan = (kode: string) => {
@@ -71,9 +111,9 @@ export default function InputBooking() {
                   <Select value={form.pegawai} onValueChange={(v) => setForm({ ...form, pegawai: v })}>
                     <SelectTrigger><SelectValue placeholder="Pilih pegawai" /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="Rizky Pratama">Rizky Pratama</SelectItem>
-                      <SelectItem value="Dimas Saputra">Dimas Saputra</SelectItem>
-                      <SelectItem value="Andi Wijaya">Andi Wijaya</SelectItem>
+                      {employees.map((employee) => (
+                        <SelectItem key={employee.id} value={employee.nama}>{employee.nama}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>

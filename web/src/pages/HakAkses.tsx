@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { toast } from "@/hooks/use-toast";
+import { api, type UserItem } from "@/lib/api";
 
 const allMenus = [
   "Dashboard",
@@ -20,22 +21,39 @@ const allMenus = [
   "Setting Komisi",
 ];
 
-const users = [
-  { username: "admin1", level: "Admin" },
-  { username: "kasir1", level: "Kasir" },
-];
-
 export default function HakAkses() {
+  const [users, setUsers] = useState<UserItem[]>([]);
   const [selectedUser, setSelectedUser] = useState("");
   const [accessMenus, setAccessMenus] = useState<string[]>([]);
 
-  const handleUserChange = (username: string) => {
+  useEffect(() => {
+    const loadUsers = async () => {
+      try {
+        const rows = await api.getUsers();
+        setUsers(rows.filter((u) => u.level !== "Owner"));
+      } catch (error) {
+        toast({
+          title: "Gagal memuat user",
+          description: error instanceof Error ? error.message : "Terjadi kesalahan",
+          variant: "destructive",
+        });
+      }
+    };
+
+    void loadUsers();
+  }, []);
+
+  const handleUserChange = async (username: string) => {
     setSelectedUser(username);
-    // Simulate existing access
-    if (username === "admin1") {
-      setAccessMenus(["Dashboard", "Master Pegawai", "Master Layanan", "Input Booking", "Booked"]);
-    } else {
-      setAccessMenus(["Dashboard", "Input Booking", "Booked"]);
+    try {
+      const payload = await api.getAccessByUsername(username);
+      setAccessMenus(payload.menuAccess || []);
+    } catch (error) {
+      toast({
+        title: "Gagal memuat hak akses",
+        description: error instanceof Error ? error.message : "Terjadi kesalahan",
+        variant: "destructive",
+      });
     }
   };
 
@@ -45,8 +63,17 @@ export default function HakAkses() {
     );
   };
 
-  const handleSave = () => {
-    toast({ title: "Berhasil", description: `Hak akses untuk ${selectedUser} berhasil disimpan` });
+  const handleSave = async () => {
+    try {
+      await api.saveAccessByUsername(selectedUser, accessMenus);
+      toast({ title: "Berhasil", description: `Hak akses untuk ${selectedUser} berhasil disimpan` });
+    } catch (error) {
+      toast({
+        title: "Gagal menyimpan",
+        description: error instanceof Error ? error.message : "Terjadi kesalahan",
+        variant: "destructive",
+      });
+    }
   };
 
   return (

@@ -2,8 +2,21 @@ import * as React from "react";
 
 import { cn } from "@/lib/utils";
 
-const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input">>(
-  ({ className, type, ...props }, ref) => {
+type InputProps = React.ComponentProps<"input"> & {
+  autoUppercase?: boolean;
+};
+
+const Input = React.forwardRef<HTMLInputElement, InputProps>(
+  ({ className, type = "text", onChange, autoUppercase = true, ...props }, ref) => {
+    const handleChange = React.useCallback(
+      (event: React.ChangeEvent<HTMLInputElement>) => {
+        if (type === "text" && autoUppercase) {
+          event.target.value = event.target.value.toUpperCase();
+        }
+        onChange?.(event);
+      },
+      [autoUppercase, onChange, type],
+    );
     return (
       <input
         type={type}
@@ -12,6 +25,7 @@ const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input">>(
           className,
         )}
         ref={ref}
+        onChange={handleChange}
         {...props}
       />
     );

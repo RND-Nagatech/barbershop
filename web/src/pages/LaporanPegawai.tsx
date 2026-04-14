@@ -1,23 +1,43 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { FileSpreadsheet, FileText } from "lucide-react";
 import { DateRangeFilter } from "@/components/DateRangeFilter";
 import { exportToExcel, exportToPDF } from "@/lib/exportUtils";
-
-const data = [
-  { kode: "PGW001", nama: "Rizky Pratama", layananSelesai: 25, totalRp: 1500000, komisi: 225000 },
-  { kode: "PGW002", nama: "Dimas Saputra", layananSelesai: 20, totalRp: 1200000, komisi: 180000 },
-  { kode: "PGW003", nama: "Andi Wijaya", layananSelesai: 18, totalRp: 980000, komisi: 147000 },
-];
+import { api, type EmployeeReportRow } from "@/lib/api";
+import { toast } from "@/hooks/use-toast";
 
 const formatRp = (n: number) =>
   new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(n);
 
 export default function LaporanPegawai() {
-  const [from, setFrom] = useState<Date | undefined>();
-  const [to, setTo] = useState<Date | undefined>();
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const [data, setData] = useState<EmployeeReportRow[]>([]);
+  const [from, setFrom] = useState<Date | undefined>(today);
+  const [to, setTo] = useState<Date | undefined>(new Date(today));
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        setData(
+          await api.getEmployeeReport({
+            from: from ? from.toISOString() : undefined,
+            to: to ? to.toISOString() : undefined,
+          }),
+        );
+      } catch (error) {
+        toast({
+          title: "Gagal memuat laporan",
+          description: error instanceof Error ? error.message : "Terjadi kesalahan",
+          variant: "destructive",
+        });
+      }
+    };
+
+    void load();
+  }, [from, to]);
 
   const headers = ["Kode", "Nama Pegawai", "Layanan Selesai", "Total (Rp)", "Komisi"];
   const rows = data.map((d) => [d.kode, d.nama, d.layananSelesai, formatRp(d.totalRp), formatRp(d.komisi)]);

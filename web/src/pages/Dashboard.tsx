@@ -1,20 +1,9 @@
+import { useEffect, useMemo, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardContent } from "@/components/ui/card";
 import { Users, Scissors, CalendarPlus, DollarSign } from "lucide-react";
-
-const stats = [
-  { label: "Total Pegawai", value: "8", icon: Users, color: "bg-accent/10 text-accent" },
-  { label: "Layanan Tersedia", value: "12", icon: Scissors, color: "bg-success/10 text-success" },
-  { label: "Booking Hari Ini", value: "24", icon: CalendarPlus, color: "bg-primary/10 text-primary" },
-  { label: "Pendapatan Hari Ini", value: "Rp 1.850.000", icon: DollarSign, color: "bg-warning/10 text-warning" },
-];
-
-const recentBookings = [
-  { id: "BK001", customer: "Ahmad", layanan: "Haircut + Wash", pegawai: "Rizky", status: "Selesai" },
-  { id: "BK002", customer: "Budi", layanan: "Shaving", pegawai: "Dimas", status: "Proses" },
-  { id: "BK003", customer: "Charlie", layanan: "Hair Coloring", pegawai: "Rizky", status: "Menunggu" },
-  { id: "BK004", customer: "David", layanan: "Haircut", pegawai: "Andi", status: "Menunggu" },
-];
+import { api, type DashboardPayload } from "@/lib/api";
+import { toast } from "@/hooks/use-toast";
 
 const statusColor: Record<string, string> = {
   Selesai: "bg-success/10 text-success",
@@ -23,6 +12,38 @@ const statusColor: Record<string, string> = {
 };
 
 export default function Dashboard() {
+  const [payload, setPayload] = useState<DashboardPayload | null>(null);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        setPayload(await api.getDashboard());
+      } catch (error) {
+        toast({
+          title: "Gagal memuat dashboard",
+          description: error instanceof Error ? error.message : "Terjadi kesalahan",
+          variant: "destructive",
+        });
+      }
+    };
+    void load();
+  }, []);
+
+  const formatRp = (n: number) =>
+    new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(n);
+
+  const stats = useMemo(
+    () => [
+      { label: "Total Pegawai", value: String(payload?.stats.totalPegawai ?? 0), icon: Users, color: "bg-accent/10 text-accent" },
+      { label: "Layanan Tersedia", value: String(payload?.stats.layananTersedia ?? 0), icon: Scissors, color: "bg-success/10 text-success" },
+      { label: "Booking Hari Ini", value: String(payload?.stats.bookingHariIni ?? 0), icon: CalendarPlus, color: "bg-primary/10 text-primary" },
+      { label: "Pendapatan Hari Ini", value: formatRp(payload?.stats.pendapatanHariIni ?? 0), icon: DollarSign, color: "bg-warning/10 text-warning" },
+    ],
+    [payload],
+  );
+
+  const recentBookings = payload?.recentBookings ?? [];
+
   return (
     <div>
       <PageHeader title="Dashboard" description="Selamat datang di BarberPro" />
@@ -71,6 +92,13 @@ export default function Dashboard() {
                     </td>
                   </tr>
                 ))}
+                {recentBookings.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="py-6 text-center text-muted-foreground">
+                      Belum ada data booking.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>

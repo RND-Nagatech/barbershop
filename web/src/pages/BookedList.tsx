@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -6,32 +6,56 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CheckCircle } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
-
-interface Booking {
-  id: string;
-  antrian: number;
-  customer: string;
-  layanan: string[];
-  pegawai: string;
-  status: "Menunggu" | "Proses" | "Selesai";
-}
+import { api, type BookingItem, type Employee } from "@/lib/api";
 
 export default function BookedList() {
-  const [data, setData] = useState<Booking[]>([
-    { id: "BK001", antrian: 1, customer: "Ahmad", layanan: ["Haircut", "Hair Wash"], pegawai: "", status: "Menunggu" },
-    { id: "BK002", antrian: 2, customer: "Budi", layanan: ["Shaving"], pegawai: "", status: "Menunggu" },
-    { id: "BK003", antrian: 3, customer: "Charlie", layanan: ["Hair Coloring"], pegawai: "Rizky Pratama", status: "Proses" },
-    { id: "BK004", antrian: 4, customer: "David", layanan: ["Haircut", "Shaving"], pegawai: "Dimas Saputra", status: "Selesai" },
-  ]);
+  const [data, setData] = useState<BookingItem[]>([]);
+  const [employees, setEmployees] = useState<Employee[]>([]);
 
-  const handleAssign = (id: string, pegawai: string) => {
-    setData(data.map((d) => (d.id === id ? { ...d, pegawai, status: "Proses" as const } : d)));
-    toast({ title: "Berhasil", description: `Booking ${id} di-assign ke ${pegawai}` });
+  const loadData = async () => {
+    try {
+      const [bookings, employeeRows] = await Promise.all([api.getBookings(), api.getEmployees()]);
+      setData(bookings);
+      setEmployees(employeeRows);
+    } catch (error) {
+      toast({
+        title: "Gagal memuat data",
+        description: error instanceof Error ? error.message : "Terjadi kesalahan",
+        variant: "destructive",
+      });
+    }
   };
 
-  const handleComplete = (id: string) => {
-    setData(data.map((d) => (d.id === id ? { ...d, status: "Selesai" as const } : d)));
-    toast({ title: "Berhasil", description: `Booking ${id} selesai` });
+  useEffect(() => {
+    void loadData();
+  }, []);
+
+  const handleAssign = async (id: string, pegawai: string) => {
+    try {
+      await api.assignBooking(id, pegawai);
+      await loadData();
+      toast({ title: "Berhasil", description: `Booking berhasil di-assign ke ${pegawai}` });
+    } catch (error) {
+      toast({
+        title: "Gagal assign booking",
+        description: error instanceof Error ? error.message : "Terjadi kesalahan",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleComplete = async (id: string) => {
+    try {
+      await api.completeBooking(id);
+      await loadData();
+      toast({ title: "Berhasil", description: "Booking selesai" });
+    } catch (error) {
+      toast({
+        title: "Gagal update booking",
+        description: error instanceof Error ? error.message : "Terjadi kesalahan",
+        variant: "destructive",
+      });
+    }
   };
 
   const statusVariant: Record<string, string> = {
@@ -56,15 +80,15 @@ export default function BookedList() {
                       {b.status}
                     </span>
                   </div>
-                  <p className="text-sm text-muted-foreground">{b.id}</p>
+                  <p className="text-sm text-muted-foreground">{b.bookingCode}</p>
                 </div>
               </div>
 
               <div className="space-y-2 mb-4">
-                <p className="text-sm"><span className="text-muted-foreground">Customer:</span> <span className="font-medium">{b.customer}</span></p>
+                <p className="text-sm"><span className="text-muted-foreground">Customer:</span> <span className="font-medium">{b.customerName}</span></p>
                 <div className="flex flex-wrap gap-1">
-                  {b.layanan.map((l) => (
-                    <Badge key={l} variant="secondary" className="text-xs">{l}</Badge>
+                  {b.services.map((l) => (
+                    <Badge key={l.kode} variant="secondary" className="text-xs">{l.nama}</Badge>
                   ))}
                 </div>
               </div>
@@ -73,16 +97,16 @@ export default function BookedList() {
                 <Select onValueChange={(v) => handleAssign(b.id, v)}>
                   <SelectTrigger className="text-sm"><SelectValue placeholder="Assign pegawai..." /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="Rizky Pratama">Rizky Pratama</SelectItem>
-                    <SelectItem value="Dimas Saputra">Dimas Saputra</SelectItem>
-                    <SelectItem value="Andi Wijaya">Andi Wijaya</SelectItem>
+                    {employees.map((employee) => (
+                      <SelectItem key={employee.id} value={employee.nama}>{employee.nama}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               )}
 
               {b.status === "Proses" && (
                 <div className="space-y-2">
-                  <p className="text-sm"><span className="text-muted-foreground">Pegawai:</span> <span className="font-medium">{b.pegawai}</span></p>
+                  <p className="text-sm"><span className="text-muted-foreground">Pegawai:</span> <span className="font-medium">{b.employeeName}</span></p>
                   <Button onClick={() => handleComplete(b.id)} className="w-full bg-success text-success-foreground hover:bg-success/90" size="sm">
                     <CheckCircle className="w-4 h-4 mr-2" /> Selesai
                   </Button>
@@ -90,11 +114,16 @@ export default function BookedList() {
               )}
 
               {b.status === "Selesai" && (
-                <p className="text-sm text-muted-foreground">Dikerjakan oleh: <span className="font-medium text-foreground">{b.pegawai}</span></p>
+                <p className="text-sm text-muted-foreground">Dikerjakan oleh: <span className="font-medium text-foreground">{b.employeeName || "-"}</span></p>
               )}
             </CardContent>
           </Card>
         ))}
+        {data.length === 0 && (
+          <Card className="border-border/50">
+            <CardContent className="p-6 text-center text-muted-foreground">Belum ada data booking.</CardContent>
+          </Card>
+        )}
       </div>
     </div>
   );

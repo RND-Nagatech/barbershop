@@ -1,24 +1,43 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { FileSpreadsheet, FileText } from "lucide-react";
 import { DateRangeFilter } from "@/components/DateRangeFilter";
 import { exportToExcel, exportToPDF } from "@/lib/exportUtils";
-
-const data = [
-  { kode: "LYN001", nama: "Haircut", jumlah: 45, total: 2250000 },
-  { kode: "LYN002", nama: "Shaving", jumlah: 30, total: 900000 },
-  { kode: "LYN003", nama: "Hair Coloring", jumlah: 12, total: 1800000 },
-  { kode: "LYN004", nama: "Hair Wash", jumlah: 38, total: 950000 },
-];
+import { api, type FinanceRow } from "@/lib/api";
+import { toast } from "@/hooks/use-toast";
 
 const formatRp = (n: number) =>
   new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(n);
 
 export default function LaporanKeuangan() {
-  const [from, setFrom] = useState<Date | undefined>();
-  const [to, setTo] = useState<Date | undefined>();
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const [data, setData] = useState<FinanceRow[]>([]);
+  const [from, setFrom] = useState<Date | undefined>(today);
+  const [to, setTo] = useState<Date | undefined>(new Date(today));
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        setData(
+          await api.getFinanceReport({
+            from: from ? from.toISOString() : undefined,
+            to: to ? to.toISOString() : undefined,
+          }),
+        );
+      } catch (error) {
+        toast({
+          title: "Gagal memuat laporan",
+          description: error instanceof Error ? error.message : "Terjadi kesalahan",
+          variant: "destructive",
+        });
+      }
+    };
+
+    void load();
+  }, [from, to]);
 
   const grandTotal = data.reduce((sum, d) => sum + d.total, 0);
 

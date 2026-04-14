@@ -6,21 +6,35 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "@/hooks/use-toast";
+import { api } from "@/lib/api";
 
 export default function Login() {
   const navigate = useNavigate();
   const [showPassword, setShowPassword] = useState(false);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!username || !password) {
       toast({ title: "Error", description: "Username dan password harus diisi", variant: "destructive" });
       return;
     }
-    toast({ title: "Berhasil", description: "Login berhasil!" });
-    navigate("/dashboard");
+    try {
+      setLoading(true);
+      await api.login(username, password);
+      toast({ title: "Berhasil", description: "Login berhasil!" });
+      navigate("/dashboard");
+    } catch (error) {
+      toast({
+        title: "Login gagal",
+        description: error instanceof Error ? error.message : "Terjadi kesalahan",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -43,6 +57,7 @@ export default function Login() {
                   id="username"
                   placeholder="Masukkan username"
                   value={username}
+                  autoUppercase={false}
                   onChange={(e) => setUsername(e.target.value)}
                 />
               </div>
@@ -54,6 +69,7 @@ export default function Login() {
                     type={showPassword ? "text" : "password"}
                     placeholder="Masukkan password"
                     value={password}
+                    autoUppercase={false}
                     onChange={(e) => setPassword(e.target.value)}
                   />
                   <button
@@ -65,8 +81,8 @@ export default function Login() {
                   </button>
                 </div>
               </div>
-              <Button type="submit" className="w-full bg-accent text-accent-foreground hover:bg-accent/90">
-                Login
+              <Button type="submit" disabled={loading} className="w-full bg-accent text-accent-foreground hover:bg-accent/90">
+                {loading ? "Memproses..." : "Login"}
               </Button>
             </form>
           </CardContent>
