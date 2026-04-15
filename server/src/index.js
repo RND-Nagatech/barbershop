@@ -267,6 +267,15 @@ const queueCounterSchema = new mongoose.Schema(
 );
 queueCounterSchema.index({ date: 1 }, { unique: true });
 
+const saleCounterSchema = new mongoose.Schema(
+  {
+    date: { type: String, required: true, trim: true },
+    seq: { type: Number, required: true, default: 0, min: 0 },
+  },
+  { timestamps: true },
+);
+saleCounterSchema.index({ date: 1 }, { unique: true });
+
 const saleItemSchema = new mongoose.Schema(
   {
     type: { type: String, enum: ["service", "product"], required: true },
@@ -283,13 +292,15 @@ const saleSchema = new mongoose.Schema(
   {
     bookingId: { type: mongoose.Schema.Types.ObjectId, ref: "Booking", required: true },
     bookingCode: { type: String, required: true, trim: true },
+    saleCode: { type: String, trim: true, default: "" },
     employeeName: { type: String, trim: true, default: "" },
     customerId: { type: mongoose.Schema.Types.ObjectId, ref: "Customer" },
     customerName: { type: String, trim: true, default: "" },
     customerPhone: { type: String, trim: true, default: "" },
     items: { type: [saleItemSchema], default: [] },
     total: { type: Number, required: true, min: 0 },
-    method: { type: String, enum: ["Cash", "Legacy"], required: true },
+    discountTotal: { type: Number, default: 0, min: 0 },
+    method: { type: String, enum: ["Cash", "QRIS", "Transfer", "Legacy"], required: true },
     received: { type: Number, required: true, min: 0 },
     change: { type: Number, required: true, min: 0 },
     paidAt: { type: Date, required: true },
@@ -308,7 +319,49 @@ saleSchema.index(
   { unique: true, partialFilterExpression: { status: "Paid" } },
 );
 saleSchema.index({ paidYmd: 1 });
+saleSchema.index({ paidYmd: 1, saleCode: 1 });
 saleSchema.index({ shareToken: 1 }, { unique: true, sparse: true });
+
+const saleLineSchema = new mongoose.Schema(
+  {
+    saleId: { type: mongoose.Schema.Types.ObjectId, ref: "Sale", required: true },
+    saleCode: { type: String, trim: true, default: "" },
+    bookingCode: { type: String, required: true, trim: true },
+    paidAt: { type: Date, required: true },
+    paidYmd: { type: String, required: true, trim: true },
+    method: { type: String, trim: true, default: "" },
+    employeeName: { type: String, trim: true, default: "" },
+    customerName: { type: String, trim: true, default: "" },
+    customerPhone: { type: String, trim: true, default: "" },
+    status: { type: String, enum: ["Paid", "Void"], default: "Paid" },
+    voidedAt: { type: Date },
+    voidReason: { type: String, trim: true, default: "" },
+    voidedBy: { type: String, trim: true, default: "" },
+
+    type: { type: String, enum: ["service", "product"], required: true },
+    kode: { type: String, required: true, trim: true },
+    nama: { type: String, required: true, trim: true },
+    harga: { type: Number, required: true, min: 0 },
+    qty: { type: Number, required: true, min: 1 },
+    subtotal: { type: Number, required: true, min: 0 },
+    isCompliment: { type: Boolean, default: false },
+  },
+  { timestamps: true },
+);
+saleLineSchema.index({ paidYmd: 1, type: 1, kode: 1 });
+saleLineSchema.index({ paidYmd: 1, employeeName: 1 });
+saleLineSchema.index({ saleId: 1 });
+
+const expenseSchema = new mongoose.Schema(
+  {
+    ymd: { type: String, required: true, trim: true },
+    amount: { type: Number, required: true, min: 1 },
+    note: { type: String, trim: true, default: "" },
+    createdBy: { type: String, trim: true, default: "" },
+  },
+  { timestamps: true },
+);
+expenseSchema.index({ ymd: 1 });
 
 const bookingServiceSchema = new mongoose.Schema(
   {
@@ -368,7 +421,10 @@ const Customer = mongoose.model("Customer", customerSchema);
 const CommissionSetting = mongoose.model("CommissionSetting", commissionSchema);
 const LoyaltySetting = mongoose.model("LoyaltySetting", loyaltySettingSchema);
 const QueueCounter = mongoose.model("QueueCounter", queueCounterSchema);
+const SaleCounter = mongoose.model("SaleCounter", saleCounterSchema);
 const Sale = mongoose.model("Sale", saleSchema);
+const SaleLine = mongoose.model("SaleLine", saleLineSchema);
+const Expense = mongoose.model("Expense", expenseSchema);
 const Booking = mongoose.model("Booking", bookingSchema);
 
 const asyncHandler = (fn) => async (req, res, next) => {
@@ -425,6 +481,12 @@ const formatBookingCode = ({ queueDate, antrian }) => {
   const yymmdd = String(queueDate || "").replace(/-/g, "").slice(2);
   const seq = String(antrian).padStart(3, "0");
   return `BK-${yymmdd}-${seq}`;
+};
+
+const formatSaleCode = ({ saleDate, seq }) => {
+  const yymmdd = String(saleDate || "").replace(/-/g, "").slice(2);
+  const num = String(seq).padStart(3, "0");
+  return `SL-${yymmdd}-${num}`;
 };
 
 const generateShareToken = () => crypto.randomBytes(18).toString("hex");
@@ -744,7 +806,7 @@ app.get(
     }
 
     const rows = await Sale.find(query)
-      .select("bookingCode employeeName total method received change paidAt paidYmd status voidedAt voidReason voidedBy createdAt")
+      .select("bookingCode saleCode employeeName total discountTotal method received change paidAt paidYmd status voidedAt voidReason voidedBy createdAt")
       .sort({ paidAt: -1 })
       .limit(300)
       .lean();
@@ -753,8 +815,10 @@ app.get(
       rows.map((r) => ({
         id: String(r._id),
         bookingCode: r.bookingCode,
+        saleCode: r.saleCode || "",
         employeeName: r.employeeName || "",
         total: r.total,
+        discountTotal: r.discountTotal || 0,
         method: r.method,
         received: r.received,
         change: r.change,
@@ -780,8 +844,10 @@ app.get(
     res.json({
       id: String(row._id),
       bookingCode: row.bookingCode,
+      saleCode: row.saleCode || "",
       employeeName: row.employeeName || "",
       total: row.total,
+      discountTotal: row.discountTotal || 0,
       method: row.method,
       received: row.received,
       change: row.change,
@@ -825,6 +891,12 @@ app.post(
           { session },
         );
 
+        await SaleLine.updateMany(
+          { saleId: sale._id, status: "Paid" },
+          { $set: { status: "Void", voidedAt, voidReason: reason, voidedBy } },
+          { session },
+        );
+
         for (const item of productItems) {
           const qty = Number(item.qty) || 0;
           if (!qty) continue;
@@ -863,6 +935,11 @@ app.post(
 
       await Sale.updateOne(
         { _id: sale._id, status: "Paid" },
+        { $set: { status: "Void", voidedAt, voidReason: reason, voidedBy } },
+      );
+
+      await SaleLine.updateMany(
+        { saleId: sale._id, status: "Paid" },
         { $set: { status: "Void", voidedAt, voidReason: reason, voidedBy } },
       );
 
@@ -1779,6 +1856,14 @@ app.post(
     const paidYmd = formatJakartaYmd(paidAt);
     const change = received - total;
 
+    const saleCounter = await SaleCounter.findOneAndUpdate(
+      { date: paidYmd },
+      { $inc: { seq: 1 }, $setOnInsert: { date: paidYmd } },
+      { new: true, upsert: true },
+    ).lean();
+    const saleSeq = saleCounter.seq;
+    const saleCode = formatSaleCode({ saleDate: paidYmd, seq: saleSeq });
+
     // Validate stock (best-effort; actual decrement happens later)
     const bookingProducts = booking.products || [];
     if (bookingProducts.length > 0) {
@@ -1813,6 +1898,7 @@ app.post(
     const salePayload = {
       bookingId: booking._id,
       bookingCode: booking.bookingCode,
+      saleCode,
       employeeName: booking.employeeName || "",
       customerId,
       customerName: booking.customerName || "",
@@ -1837,6 +1923,7 @@ app.post(
         })),
       ],
       total,
+      discountTotal: 0,
       method: "Cash",
       received,
       change,
@@ -1861,6 +1948,29 @@ app.post(
 
         salePayload.loyaltyEarnedRp = loyaltyEarnedRp;
         createdSale = await Sale.create([salePayload], { session }).then((rows) => rows[0]);
+
+        const saleLines = (salePayload.items || []).map((it) => ({
+          saleId: createdSale._id,
+          saleCode: salePayload.saleCode || "",
+          bookingCode: salePayload.bookingCode,
+          paidAt,
+          paidYmd,
+          method: salePayload.method,
+          employeeName: salePayload.employeeName || "",
+          customerName: salePayload.customerName || "",
+          customerPhone: salePayload.customerPhone || "",
+          status: "Paid",
+          type: it.type,
+          kode: it.kode,
+          nama: it.nama,
+          harga: Number(it.harga) || 0,
+          qty: Number(it.qty) || 1,
+          subtotal: (Number(it.harga) || 0) * (Number(it.qty) || 1),
+          isCompliment: Boolean(it.isCompliment),
+        }));
+        if (saleLines.length > 0) {
+          await SaleLine.insertMany(saleLines, { session, ordered: true });
+        }
 
         const requiredMap = new Map();
         for (const item of booking.products || []) {
@@ -1937,6 +2047,27 @@ app.post(
           if (dupErr?.code === 11000) return res.status(409).json({ message: "Transaksi untuk booking ini sudah ada" });
           throw dupErr;
         }
+
+        const saleLines = (salePayload.items || []).map((it) => ({
+          saleId: createdSale._id,
+          saleCode: salePayload.saleCode || "",
+          bookingCode: salePayload.bookingCode,
+          paidAt,
+          paidYmd,
+          method: salePayload.method,
+          employeeName: salePayload.employeeName || "",
+          customerName: salePayload.customerName || "",
+          customerPhone: salePayload.customerPhone || "",
+          status: "Paid",
+          type: it.type,
+          kode: it.kode,
+          nama: it.nama,
+          harga: Number(it.harga) || 0,
+          qty: Number(it.qty) || 1,
+          subtotal: (Number(it.harga) || 0) * (Number(it.qty) || 1),
+          isCompliment: Boolean(it.isCompliment),
+        }));
+        if (saleLines.length > 0) await SaleLine.insertMany(saleLines);
 
         const requiredMap = new Map();
         for (const item of booking.products || []) {
@@ -2034,6 +2165,7 @@ app.post(
       paymentStatus: updated.paymentStatus,
       paidAt: updated.paidAt,
       saleId: createdSale ? String(createdSale._id) : "",
+      saleCode: salePayload.saleCode || "",
       customerName: booking.customerName || "",
       customerPhone: booking.phone || "",
       items: salePayload.items,
@@ -2079,10 +2211,199 @@ app.get(
 );
 
 app.get(
+  "/api/reports/transactions/recap",
+  requireLevels("Owner", "Admin", "Kasir"),
+  asyncHandler(async (req, res) => {
+    const matchSale = {};
+    if (req.query.from && req.query.to) {
+      matchSale.paidYmd = { $gte: req.query.from, $lte: req.query.to };
+    } else if (req.query.from) {
+      matchSale.paidYmd = { $gte: req.query.from };
+    } else if (req.query.to) {
+      matchSale.paidYmd = { $lte: req.query.to };
+    }
+
+    const includeVoid = String(req.query.includeVoid || "") === "1";
+    if (!includeVoid) matchSale.status = "Paid";
+
+    const [salesByDay, linesByDayType] = await Promise.all([
+      Sale.aggregate([
+        { $match: matchSale },
+        {
+          $group: {
+            _id: "$paidYmd",
+            totalTransaksi: { $sum: 1 },
+            totalOmzet: { $sum: "$total" },
+            totalDiskon: { $sum: { $ifNull: ["$discountTotal", 0] } },
+          },
+        },
+        { $sort: { _id: 1 } },
+      ]),
+      SaleLine.aggregate([
+        { $match: matchSale },
+        {
+          $group: {
+            _id: { ymd: "$paidYmd", type: "$type" },
+            total: { $sum: "$subtotal" },
+          },
+        },
+        { $sort: { "_id.ymd": 1 } },
+      ]),
+    ]);
+
+    const byDay = new Map();
+    for (const row of salesByDay) {
+      byDay.set(row._id, {
+        ymd: row._id,
+        totalTransaksi: row.totalTransaksi || 0,
+        totalOmzet: row.totalOmzet || 0,
+        totalService: 0,
+        totalProduk: 0,
+        totalDiskon: row.totalDiskon || 0,
+      });
+    }
+
+    for (const row of linesByDayType) {
+      const ymd = row._id?.ymd;
+      if (!ymd) continue;
+      const existing =
+        byDay.get(ymd) ||
+        ({ ymd, totalTransaksi: 0, totalOmzet: 0, totalService: 0, totalProduk: 0, totalDiskon: 0 });
+      if (row._id?.type === "service") existing.totalService = row.total || 0;
+      if (row._id?.type === "product") existing.totalProduk = row.total || 0;
+      byDay.set(ymd, existing);
+    }
+
+    const days = Array.from(byDay.values()).sort((a, b) => String(a.ymd).localeCompare(String(b.ymd)));
+    const totals = days.reduce(
+      (acc, d) => {
+        acc.totalTransaksi += d.totalTransaksi || 0;
+        acc.totalOmzet += d.totalOmzet || 0;
+        acc.totalService += d.totalService || 0;
+        acc.totalProduk += d.totalProduk || 0;
+        acc.totalDiskon += d.totalDiskon || 0;
+        return acc;
+      },
+      { totalTransaksi: 0, totalOmzet: 0, totalService: 0, totalProduk: 0, totalDiskon: 0 },
+    );
+
+    res.json({ from: req.query.from || "", to: req.query.to || "", days, totals, includeVoid });
+  }),
+);
+
+app.get(
+  "/api/reports/transactions/details",
+  requireLevels("Owner", "Admin", "Kasir"),
+  asyncHandler(async (req, res) => {
+    const query = {};
+    if (req.query.from && req.query.to) {
+      query.paidYmd = { $gte: req.query.from, $lte: req.query.to };
+    } else if (req.query.from) {
+      query.paidYmd = { $gte: req.query.from };
+    } else if (req.query.to) {
+      query.paidYmd = { $lte: req.query.to };
+    }
+
+    const includeVoid = String(req.query.includeVoid || "") === "1";
+    if (!includeVoid) query.status = "Paid";
+
+    const q = String(req.query.q || "").trim();
+    if (q) {
+      query.$or = [
+        { bookingCode: { $regex: q, $options: "i" } },
+        { saleCode: { $regex: q, $options: "i" } },
+        { customerName: { $regex: q, $options: "i" } },
+        { customerPhone: { $regex: q, $options: "i" } },
+        { employeeName: { $regex: q, $options: "i" } },
+      ];
+    }
+
+    const rows = await Sale.find(query)
+      .select("saleCode bookingCode customerName customerPhone employeeName total discountTotal method status paidAt paidYmd voidedAt voidReason voidedBy")
+      .sort({ paidAt: 1 })
+      .limit(2000)
+      .lean();
+
+    res.json(
+      rows.map((r) => ({
+        id: String(r._id),
+        saleCode: r.saleCode || "",
+        bookingCode: r.bookingCode,
+        customerName: r.customerName || "",
+        customerPhone: r.customerPhone || "",
+        barber: r.employeeName || "",
+        total: Number(r.total) || 0,
+        discountTotal: Number(r.discountTotal) || 0,
+        method: r.method || "Cash",
+        status: r.status || "Paid",
+        paidAt: r.paidAt,
+        paidYmd: r.paidYmd,
+        voidedAt: r.voidedAt,
+        voidReason: r.voidReason || "",
+        voidedBy: r.voidedBy || "",
+      })),
+    );
+  }),
+);
+
+app.get(
+  "/api/reports/transactions/items",
+  requireLevels("Owner", "Admin", "Kasir"),
+  asyncHandler(async (req, res) => {
+    const saleId = toObjectId(req.query.saleId);
+    const saleCode = String(req.query.saleCode || "").trim();
+    const bookingCode = String(req.query.bookingCode || "").trim();
+
+    let sale = null;
+    if (saleId) {
+      sale = await Sale.findById(saleId).select("_id saleCode bookingCode paidAt paidYmd customerName customerPhone employeeName method status").lean();
+    } else if (saleCode) {
+      sale = await Sale.findOne({ saleCode }).select("_id saleCode bookingCode paidAt paidYmd customerName customerPhone employeeName method status").lean();
+    } else if (bookingCode) {
+      sale = await Sale.findOne({ bookingCode, status: "Paid" })
+        .sort({ paidAt: -1 })
+        .select("_id saleCode bookingCode paidAt paidYmd customerName customerPhone employeeName method status")
+        .lean();
+    }
+
+    if (!sale) return res.status(404).json({ message: "Transaksi tidak ditemukan" });
+
+    const lines = await SaleLine.find({ saleId: sale._id })
+      .select("type kode nama qty harga subtotal isCompliment")
+      .sort({ type: 1, createdAt: 1 })
+      .lean();
+
+    res.json({
+      sale: {
+        id: String(sale._id),
+        saleCode: sale.saleCode || "",
+        bookingCode: sale.bookingCode,
+        paidAt: sale.paidAt,
+        paidYmd: sale.paidYmd,
+        customerName: sale.customerName || "",
+        customerPhone: sale.customerPhone || "",
+        barber: sale.employeeName || "",
+        method: sale.method || "Cash",
+        status: sale.status || "Paid",
+      },
+      items: lines.map((l) => ({
+        type: l.type,
+        kode: l.kode,
+        nama: l.nama,
+        qty: Number(l.qty) || 1,
+        harga: Number(l.harga) || 0,
+        subtotal: Number(l.subtotal) || 0,
+        isCompliment: Boolean(l.isCompliment),
+      })),
+    });
+  }),
+);
+
+app.get(
   "/api/reports/finance",
   requireLevels("Owner", "Admin", "Kasir"),
   asyncHandler(async (req, res) => {
-    const match = {};
+    const match = { status: "Paid" };
     if (req.query.from && req.query.to) {
       match.paidYmd = { $gte: req.query.from, $lte: req.query.to };
     } else if (req.query.from) {
@@ -2090,17 +2411,15 @@ app.get(
     } else if (req.query.to) {
       match.paidYmd = { $lte: req.query.to };
     }
-    match.status = "Paid";
 
-    const rows = await Sale.aggregate([
+    const rows = await SaleLine.aggregate([
       { $match: match },
-      { $unwind: "$items" },
       {
         $group: {
-          _id: { type: "$items.type", kode: "$items.kode" },
-          nama: { $first: "$items.nama" },
-          jumlah: { $sum: "$items.qty" },
-          total: { $sum: { $multiply: ["$items.harga", "$items.qty"] } },
+          _id: { type: "$type", kode: "$kode" },
+          nama: { $first: "$nama" },
+          jumlah: { $sum: "$qty" },
+          total: { $sum: "$subtotal" },
         },
       },
       { $sort: { "_id.type": 1, "_id.kode": 1 } },

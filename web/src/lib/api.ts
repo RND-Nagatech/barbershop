@@ -185,6 +185,65 @@ export interface EmployeeReportRow {
   komisi: number;
 }
 
+export type TransactionRecapDay = {
+  ymd: string;
+  totalTransaksi: number;
+  totalOmzet: number;
+  totalService: number;
+  totalProduk: number;
+  totalDiskon: number;
+};
+
+export type TransactionRecapResponse = {
+  from: string;
+  to: string;
+  includeVoid: boolean;
+  days: TransactionRecapDay[];
+  totals: Omit<TransactionRecapDay, "ymd">;
+};
+
+export type TransactionDetailRow = {
+  id: string;
+  saleCode: string;
+  bookingCode: string;
+  customerName: string;
+  customerPhone: string;
+  barber: string;
+  total: number;
+  discountTotal: number;
+  method: string;
+  status: "Paid" | "Void";
+  paidAt: string;
+  paidYmd: string;
+  voidedAt?: string;
+  voidReason?: string;
+  voidedBy?: string;
+};
+
+export type TransactionItemsResponse = {
+  sale: {
+    id: string;
+    saleCode: string;
+    bookingCode: string;
+    paidAt: string;
+    paidYmd: string;
+    customerName: string;
+    customerPhone: string;
+    barber: string;
+    method: string;
+    status: "Paid" | "Void";
+  };
+  items: Array<{
+    type: "service" | "product";
+    kode: string;
+    nama: string;
+    qty: number;
+    harga: number;
+    subtotal: number;
+    isCompliment?: boolean;
+  }>;
+};
+
 export interface QueuePreview {
   queueDate: string;
   nextAntrian: number;
@@ -424,5 +483,29 @@ export const api = {
     if (params?.to) query.set("to", params.to);
     const suffix = query.toString() ? `?${query.toString()}` : "";
     return request<EmployeeReportRow[]>(`/reports/employees${suffix}`);
+  },
+
+  getTransactionRecap: (params?: { from?: string; to?: string }) => {
+    const query = new URLSearchParams();
+    if (params?.from) query.set("from", params.from);
+    if (params?.to) query.set("to", params.to);
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return request<TransactionRecapResponse>(`/reports/transactions/recap${suffix}`);
+  },
+  getTransactionDetails: (params?: { from?: string; to?: string; q?: string; includeVoid?: boolean }) => {
+    const query = new URLSearchParams();
+    if (params?.from) query.set("from", params.from);
+    if (params?.to) query.set("to", params.to);
+    if (params?.q) query.set("q", params.q);
+    if (params?.includeVoid) query.set("includeVoid", "1");
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return request<TransactionDetailRow[]>(`/reports/transactions/details${suffix}`);
+  },
+  getTransactionItems: (params: { saleId?: string; saleCode?: string; bookingCode?: string }) => {
+    const query = new URLSearchParams();
+    if (params.saleId) query.set("saleId", params.saleId);
+    if (params.saleCode) query.set("saleCode", params.saleCode);
+    if (params.bookingCode) query.set("bookingCode", params.bookingCode);
+    return request<TransactionItemsResponse>(`/reports/transactions/items?${query.toString()}`);
   },
 };

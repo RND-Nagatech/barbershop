@@ -12,6 +12,7 @@ import MasterProduk from "./pages/MasterProduk";
 import InputBooking from "./pages/InputBooking";
 import BookedList from "./pages/BookedList";
 import RiwayatTransaksi from "./pages/RiwayatTransaksi";
+import LaporanTransaksi from "./pages/LaporanTransaksi";
 import LaporanKeuangan from "./pages/LaporanKeuangan";
 import LaporanPegawai from "./pages/LaporanPegawai";
 import LaporanStok from "./pages/LaporanStok";
@@ -52,6 +53,7 @@ const App = () => (
             <Route path="/booking/input" element={<InputBooking />} />
             <Route path="/booking/list" element={<BookedList />} />
             <Route path="/transaksi/riwayat" element={<RiwayatTransaksi />} />
+            <Route path="/laporan/transaksi" element={<LaporanTransaksi />} />
             <Route path="/laporan/keuangan" element={<LaporanKeuangan />} />
             <Route path="/laporan/pegawai" element={<LaporanPegawai />} />
             <Route path="/laporan/stok" element={<LaporanStok />} />

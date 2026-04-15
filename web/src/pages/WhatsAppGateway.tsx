@@ -132,15 +132,12 @@ export default function WhatsAppGateway() {
             </div>
 
             <div className="space-y-2">
-              <Label>Base URL (set di server/.env sebagai `WEB_PUBLIC_BASE_URL`)</Label>
+              <Label>Base URL</Label>
               <Input readOnly value={baseUrlHint} />
-              <p className="text-xs text-muted-foreground">
-                Contoh: <span className="font-mono">{baseUrlHint}</span>
-              </p>
             </div>
 
             <div className="space-y-2">
-              <Label>API Base URL (set di `web/.env` sebagai `VITE_API_BASE_URL`)</Label>
+              <Label>API Base URL</Label>
               <Input readOnly value={API_BASE_URL} />
             </div>
 

@@ -31,6 +31,7 @@ export function AppLayout() {
       [/^\/booking\/list/, "Booked"],
       [/^\/kasir\/pembayaran/, "Kasir / Pembayaran"],
       [/^\/transaksi\/riwayat/, "Riwayat Transaksi"],
+      [/^\/laporan\/transaksi/, "Laporan Transaksi"],
       [/^\/laporan\/keuangan/, "Laporan Keuangan"],
       [/^\/laporan\/pegawai/, "Laporan Pegawai"],
       [/^\/laporan\/stok/, "Laporan Stok"],

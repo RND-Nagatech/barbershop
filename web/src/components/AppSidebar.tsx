@@ -77,6 +77,7 @@ const menuGroups = [
     label: "Laporan",
     icon: BarChart3,
     items: [
+      { title: "Laporan Transaksi", url: "/laporan/transaksi", icon: FileText },
       { title: "Laporan Keuangan", url: "/laporan/keuangan", icon: FileText },
       { title: "Laporan Pegawai", url: "/laporan/pegawai", icon: FileText },
       { title: "Laporan Stok", url: "/laporan/stok", icon: Boxes },

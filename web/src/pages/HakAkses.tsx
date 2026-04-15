@@ -18,6 +18,7 @@ const allMenus = [
   "Booked",
   "Kasir / Pembayaran",
   "Riwayat Transaksi",
+  "Laporan Transaksi",
   "Laporan Keuangan",
   "Laporan Pegawai",
   "Laporan Stok",
