@@ -73,22 +73,6 @@ const startSocket = async () => {
   sock.ev.on("creds.update", saveCreds);
   sock.ev.on("connection.update", (update) => {
     void (async () => {
-      if (update.qr) {
-        try {
-          state.qrDataUrl = await QRCode.toDataURL(update.qr, { margin: 1, width: 280 });
-        } catch (err) {
-          state.qrDataUrl = "";
-          state.lastError = err instanceof Error ? err.message : String(err);
-          state.lastErrorDetail = { message: state.lastError };
-        }
-        state.me = "";
-        setStatus("qr");
-      }
-
-      if (update.connection === "connecting") {
-        setStatus("connecting");
-      }
-
       if (update.connection === "open") {
         state.qrDataUrl = "";
         state.me = sock?.user?.id ? String(sock.user.id) : "";
@@ -96,6 +80,7 @@ const startSocket = async () => {
         state.lastErrorDetail = null;
         setStatus("connected");
         clearReconnect();
+        return;
       }
 
       if (update.connection === "close") {
@@ -123,6 +108,23 @@ const startSocket = async () => {
           setStatus("disconnected");
           scheduleReconnect();
         }
+        return;
+      }
+
+      if (update.connection === "connecting") {
+        setStatus("connecting");
+      }
+
+      if (update.qr && state.status !== "connected") {
+        try {
+          state.qrDataUrl = await QRCode.toDataURL(update.qr, { margin: 1, width: 280 });
+        } catch (err) {
+          state.qrDataUrl = "";
+          state.lastError = err instanceof Error ? err.message : String(err);
+          state.lastErrorDetail = { message: state.lastError };
+        }
+        state.me = "";
+        setStatus("qr");
       }
     })().catch((err) => {
       state.lastError = err instanceof Error ? err.message : String(err);
@@ -163,6 +165,23 @@ const waitForQrOrConnected = async ({ timeoutMs = 20000 } = {}) => {
     await new Promise((r) => setTimeout(r, 250));
   }
   return getSnapshot();
+};
+
+const waitForConnected = async ({ timeoutMs = 5000 } = {}) => {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (state.status === "connected" && state.socket) return true;
+    // If QR is needed, we can't auto-send.
+    if (state.status === "qr") return false;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  return state.status === "connected" && !!state.socket;
+};
+
+const ensureConnected = async ({ timeoutMs = 5000 } = {}) => {
+  if (state.status === "connected" && state.socket) return true;
+  await connectInternal();
+  return waitForConnected({ timeoutMs });
 };
 
 const scheduleReconnect = () => {
@@ -219,10 +238,32 @@ export const waGateway = {
   sendText: async (phone, text) => {
     const normalized = normalizeWaPhoneId(phone);
     if (!normalized) return false;
-    if (!state.socket || state.status !== "connected") return false;
+    const okConn = await ensureConnected({ timeoutMs: 5000 });
+    if (!okConn || !state.socket || state.status !== "connected") return false;
     try {
       const jid = `${normalized}@s.whatsapp.net`;
       await state.socket.sendMessage(jid, { text: String(text || "") });
+      return true;
+    } catch (err) {
+      state.lastError = err instanceof Error ? err.message : String(err);
+      return false;
+    }
+  },
+
+  sendDocument: async (phone, buffer, { fileName = "file.pdf", caption = "", mimetype = "application/pdf" } = {}) => {
+    const normalized = normalizeWaPhoneId(phone);
+    if (!normalized) return false;
+    const okConn = await ensureConnected({ timeoutMs: 8000 });
+    if (!okConn || !state.socket || state.status !== "connected") return false;
+    if (!buffer) return false;
+    try {
+      const jid = `${normalized}@s.whatsapp.net`;
+      await state.socket.sendMessage(jid, {
+        document: buffer,
+        mimetype,
+        fileName,
+        ...(caption ? { caption: String(caption) } : {}),
+      });
       return true;
     } catch (err) {
       state.lastError = err instanceof Error ? err.message : String(err);

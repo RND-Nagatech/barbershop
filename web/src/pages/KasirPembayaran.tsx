@@ -21,8 +21,27 @@ import { buildReceiptText, generateReceiptPdf, openEmailReceipt, openReceiptPrin
 const formatRp = (n: number) =>
   new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(n);
 
-function sumTotal(booking: BookingItem) {
+const formatRupiahInput = (value: string) => {
+  const digits = String(value || "").replace(/\D/g, "");
+  if (!digits) return "";
+  return new Intl.NumberFormat("id-ID").format(Number(digits));
+};
+
+const sanitizeRupiahInput = (value: string) => String(value || "").replace(/\D/g, "");
+
+function sumServiceTotal(booking: BookingItem) {
   return booking.services.reduce((sum, s) => sum + (Number(s.harga) || 0), 0);
+}
+
+function sumProductTotal(booking: BookingItem) {
+  return (booking.products || []).reduce((sum, p) => {
+    if (p.isCompliment) return sum;
+    return sum + (Number(p.harga) || 0) * (Number(p.qty) || 0);
+  }, 0);
+}
+
+function sumGrandTotal(booking: BookingItem) {
+  return sumServiceTotal(booking) + sumProductTotal(booking);
 }
 
 export default function KasirPembayaran() {
@@ -39,12 +58,13 @@ export default function KasirPembayaran() {
   const [received, setReceived] = useState("");
   const [selectedProduct, setSelectedProduct] = useState("");
   const [productQty, setProductQty] = useState("1");
+  const [productIsCompliment, setProductIsCompliment] = useState(false);
   const [receipt, setReceipt] = useState<{
     bookingCode: string;
     paidAt: string;
     customerName: string;
     customerPhone: string;
-    items: Array<{ type: "service" | "product"; kode: string; nama: string; harga: number; qty: number }>;
+    items: Array<{ type: "service" | "product"; kode: string; nama: string; harga: number; qty: number; isCompliment?: boolean }>;
     total: number;
     received: number;
     change: number;
@@ -87,21 +107,19 @@ export default function KasirPembayaran() {
     });
   }, [data, query]);
 
-  const total = useMemo(() => (payTarget ? sumTotal(payTarget) : 0), [payTarget]);
-  const totalProducts = useMemo(
-    () => (payTarget ? payTarget.products.reduce((sum, p) => sum + (Number(p.harga) || 0) * (Number(p.qty) || 0), 0) : 0),
-    [payTarget],
-  );
-  const grandTotal = total + totalProducts;
+  const totalServices = useMemo(() => (payTarget ? sumServiceTotal(payTarget) : 0), [payTarget]);
+  const totalProducts = useMemo(() => (payTarget ? sumProductTotal(payTarget) : 0), [payTarget]);
+  const grandTotal = totalServices + totalProducts;
   const receivedNum = Number(received || 0);
   const change = receivedNum - grandTotal;
 
   const openPay = (b: BookingItem) => {
     setPayTarget(b);
-    const nextTotal = sumTotal(b) + b.products.reduce((sum, p) => sum + (Number(p.harga) || 0) * (Number(p.qty) || 0), 0);
+    const nextTotal = sumGrandTotal(b);
     setReceived(String(nextTotal));
     setSelectedProduct("");
     setProductQty("1");
+    setProductIsCompliment(false);
   };
 
   const addProduct = async () => {
@@ -112,7 +130,7 @@ export default function KasirPembayaran() {
       return;
     }
     try {
-      const updated = await api.addProductToBooking(payTarget.id, selectedProduct, qty);
+      const updated = await api.addProductToBooking(payTarget.id, selectedProduct, qty, productIsCompliment);
       setPayTarget({ ...payTarget, products: updated.products });
       await loadData();
       toast({ title: "Berhasil", description: "Produk ditambahkan" });
@@ -125,10 +143,10 @@ export default function KasirPembayaran() {
     }
   };
 
-  const removeProduct = async (kode: string) => {
+  const removeProduct = async (kode: string, isCompliment?: boolean) => {
     if (!payTarget) return;
     try {
-      const updated = await api.removeProductFromBooking(payTarget.id, kode);
+      const updated = await api.removeProductFromBooking(payTarget.id, kode, isCompliment);
       setPayTarget({ ...payTarget, products: updated.products });
       await loadData();
       toast({ title: "Berhasil", description: "Produk dihapus" });
@@ -197,7 +215,7 @@ export default function KasirPembayaran() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {filtered.map((b) => {
-            const bookingTotal = sumTotal(b);
+            const bookingTotal = sumGrandTotal(b);
             return (
               <Card key={b.id} className="border-border/50">
                 <CardContent className="p-5 space-y-3">
@@ -254,9 +272,12 @@ export default function KasirPembayaran() {
                 <p className="text-xs text-muted-foreground">Produk</p>
                 <div className="space-y-1">
                   {payTarget.products.map((p) => (
-                    <div key={p.kode} className="flex items-center justify-between gap-3">
-                      <span className="text-xs">{p.nama} x{p.qty}</span>
-                      <button className="text-xs text-destructive" type="button" onClick={() => removeProduct(p.kode)}>
+                    <div key={`${p.kode}:${p.isCompliment ? 1 : 0}`} className="flex items-center justify-between gap-3">
+                      <span className="text-xs">
+                        {p.nama} x{p.qty}{" "}
+                        {p.isCompliment ? <span className="text-[10px] text-muted-foreground">(Compliment)</span> : null}
+                      </span>
+                      <button className="text-xs text-destructive" type="button" onClick={() => removeProduct(p.kode, p.isCompliment)}>
                         Hapus
                       </button>
                     </div>
@@ -287,17 +308,23 @@ export default function KasirPembayaran() {
                   onChange={(e) => setProductQty(e.target.value.replace(/\D/g, ""))}
                 />
               </div>
-              <Button type="button" variant="outline" onClick={addProduct} disabled={!selectedProduct}>
-                Tambah
-              </Button>
+              <div className="flex items-center justify-between gap-2">
+                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <input type="checkbox" checked={productIsCompliment} onChange={(e) => setProductIsCompliment(e.target.checked)} />
+                  Compliment (harga 0)
+                </label>
+                <Button type="button" variant="outline" onClick={addProduct} disabled={!selectedProduct}>
+                  Tambah
+                </Button>
+              </div>
             </div>
             <div className="space-y-1">
               <label className="text-muted-foreground text-xs">Uang diterima</label>
               <Input
-                value={received}
+                value={formatRupiahInput(received)}
                 autoUppercase={false}
                 inputMode="numeric"
-                onChange={(e) => setReceived(e.target.value.replace(/\D/g, ""))}
+                onChange={(e) => setReceived(sanitizeRupiahInput(e.target.value))}
                 placeholder="0"
               />
             </div>
@@ -333,9 +360,12 @@ export default function KasirPembayaran() {
               </div>
             )}
             <div className="space-y-1">
-              {(receipt?.items || []).map((it) => (
-                <div key={`${it.type}:${it.kode}`} className="flex justify-between gap-2">
-                  <span className="truncate">{it.nama} x{it.qty}</span>
+              {(receipt?.items || []).map((it, idx) => (
+                <div key={`${it.type}:${it.kode}:${it.isCompliment ? 1 : 0}:${idx}`} className="flex justify-between gap-2">
+                  <span className="truncate">
+                    {it.nama}
+                    {it.type === "product" && it.isCompliment ? " (Compliment)" : ""} x{it.qty}
+                  </span>
                   <span>{formatRp(it.harga * it.qty)}</span>
                 </div>
               ))}

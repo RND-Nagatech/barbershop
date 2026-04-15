@@ -54,6 +54,7 @@ export interface Service {
   kode: string;
   nama: string;
   harga: number;
+  compliments?: Array<{ kode: string; qty: number }>;
 }
 
 export interface Product {
@@ -91,6 +92,7 @@ export interface BookingProduct {
   nama: string;
   harga: number;
   qty: number;
+  isCompliment?: boolean;
 }
 
 export interface BookingItem {
@@ -134,6 +136,7 @@ export type PublicTicket = {
   customerName: string;
   phone: string;
   services: BookingService[];
+  products: BookingProduct[];
   branch: Branch | null;
 };
 
@@ -141,7 +144,7 @@ export type PublicReceipt = {
   bookingCode: string;
   paidAt: string;
   paidYmd: string;
-  items: Array<{ type: "service" | "product"; kode: string; nama: string; harga: number; qty: number }>;
+  items: Array<{ type: "service" | "product"; kode: string; nama: string; harga: number; qty: number; isCompliment?: boolean }>;
   total: number;
   received: number;
   change: number;
@@ -194,6 +197,7 @@ export interface SaleItem {
   nama: string;
   harga: number;
   qty: number;
+  isCompliment?: boolean;
 }
 
 export interface PayResponse {
@@ -394,10 +398,15 @@ export const api = {
     request<BookingItem>("/bookings", "POST", payload),
   payBooking: (id: string, received: number) => request<PayResponse>(`/bookings/${id}/pay`, "POST", { received }),
   addServiceToBooking: (id: string, serviceKode: string) => request<{ id: string; bookingCode: string; services: BookingService[] }>(`/bookings/${id}/add-service`, "POST", { serviceKode }),
-  addProductToBooking: (id: string, productKode: string, qty: number) =>
-    request<{ id: string; bookingCode: string; products: BookingProduct[] }>(`/bookings/${id}/add-product`, "POST", { productKode, qty }),
-  removeProductFromBooking: (id: string, productKode: string) =>
-    request<{ id: string; bookingCode: string; products: BookingProduct[] }>(`/bookings/${id}/products/${encodeURIComponent(productKode)}`, "DELETE"),
+  addProductToBooking: (id: string, productKode: string, qty: number, isCompliment?: boolean) =>
+    request<{ id: string; bookingCode: string; products: BookingProduct[] }>(`/bookings/${id}/add-product`, "POST", { productKode, qty, isCompliment: Boolean(isCompliment) }),
+  removeProductFromBooking: (id: string, productKode: string, isCompliment?: boolean) => {
+    const suffix = isCompliment ? "?isCompliment=1" : "";
+    return request<{ id: string; bookingCode: string; products: BookingProduct[] }>(
+      `/bookings/${id}/products/${encodeURIComponent(productKode)}${suffix}`,
+      "DELETE",
+    );
+  },
   assignBooking: (id: string, employeeName: string) => request(`/bookings/${id}/assign`, "PATCH", { employeeName }),
   completeBooking: (id: string) => request(`/bookings/${id}/complete`, "PATCH"),
 

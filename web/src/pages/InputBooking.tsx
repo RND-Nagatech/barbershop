@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -7,11 +7,12 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "@/hooks/use-toast";
-import { api, type Employee, type Service } from "@/lib/api";
+import { api, type Employee, type Product, type Service } from "@/lib/api";
 
 export default function InputBooking() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [layananList, setLayananList] = useState<Service[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
   const [form, setForm] = useState({
     namaCustomer: "",
     noHp: "",
@@ -23,14 +24,16 @@ export default function InputBooking() {
   useEffect(() => {
     const load = async () => {
       try {
-        const [employeeRows, serviceRows, preview] = await Promise.all([
+        const [employeeRows, serviceRows, preview, productRows] = await Promise.all([
           api.getEmployees(),
           api.getServices(),
           api.getQueuePreview(),
+          api.getProducts().catch(() => [] as Product[]),
         ]);
         setEmployees(employeeRows);
         setLayananList(serviceRows);
         setAntrian(preview.nextAntrian);
+        setProducts(productRows);
       } catch (error) {
         toast({
           title: "Gagal memuat data",
@@ -46,6 +49,17 @@ export default function InputBooking() {
   const formatRp = (n: number) => new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(n);
 
   const total = layananList.filter((l) => selectedLayanan.includes(l.kode)).reduce((sum, l) => sum + l.harga, 0);
+
+  const productNameByKode = useMemo(() => {
+    const map: Record<string, string> = {};
+    products.forEach((p) => (map[p.kode] = p.nama));
+    return map;
+  }, [products]);
+
+  const selectedServiceRows = useMemo(
+    () => layananList.filter((l) => selectedLayanan.includes(l.kode)),
+    [layananList, selectedLayanan],
+  );
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -149,14 +163,23 @@ export default function InputBooking() {
                 </div>
                 <hr className="border-border" />
                 {selectedLayanan.length > 0 ? (
-                  layananList
-                    .filter((l) => selectedLayanan.includes(l.kode))
-                    .map((l) => (
-                      <div key={l.kode} className="flex justify-between">
-                        <span>{l.nama}</span>
-                        <span>{formatRp(l.harga)}</span>
+                  selectedServiceRows.map((l) => {
+                    const compliments = Array.isArray(l.compliments) ? l.compliments : [];
+                    const complimentText = compliments
+                      .map((c) => `${productNameByKode[c.kode] || c.kode} x${c.qty || 1}`)
+                      .join(", ");
+                    return (
+                      <div key={l.kode} className="space-y-1">
+                        <div className="flex justify-between">
+                          <span>{l.nama}</span>
+                          <span>{formatRp(l.harga)}</span>
+                        </div>
+                        {compliments.length > 0 && (
+                          <div className="text-xs text-destructive">Compliment: {complimentText}</div>
+                        )}
                       </div>
-                    ))
+                    );
+                  })
                 ) : (
                   <p className="text-muted-foreground text-center py-2">Belum ada layanan dipilih</p>
                 )}

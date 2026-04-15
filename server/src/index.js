@@ -5,6 +5,7 @@ import morgan from "morgan";
 import mongoose from "mongoose";
 import crypto from "crypto";
 import { waGateway } from "./waGateway.js";
+import { buildReceiptPdf, buildTicketPdf } from "./pdfUtils.js";
 
 process.on("unhandledRejection", (reason) => {
   console.error("UnhandledRejection:", reason);
@@ -158,11 +159,20 @@ const employeeSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+const serviceComplimentSchema = new mongoose.Schema(
+  {
+    kode: { type: String, required: true, trim: true },
+    qty: { type: Number, required: true, min: 1, default: 1 },
+  },
+  { _id: false },
+);
+
 const serviceSchema = new mongoose.Schema(
   {
     kode: { type: String, required: true, unique: true, trim: true },
     nama: { type: String, required: true, trim: true },
     harga: { type: Number, required: true, min: 0 },
+    compliments: { type: [serviceComplimentSchema], default: [] },
   },
   { timestamps: true },
 );
@@ -264,6 +274,7 @@ const saleItemSchema = new mongoose.Schema(
     nama: { type: String, required: true, trim: true },
     harga: { type: Number, required: true, min: 0 },
     qty: { type: Number, required: true, min: 1 },
+    isCompliment: { type: Boolean, default: false },
   },
   { _id: false },
 );
@@ -314,6 +325,7 @@ const bookingProductSchema = new mongoose.Schema(
     nama: { type: String, required: true },
     harga: { type: Number, required: true, min: 0 },
     qty: { type: Number, required: true, min: 1 },
+    isCompliment: { type: Boolean, default: false },
   },
   { _id: false },
 );
@@ -419,7 +431,10 @@ const generateShareToken = () => crypto.randomBytes(18).toString("hex");
 
 const sumBookingTotal = (booking) => (booking?.services || []).reduce((sum, s) => sum + (Number(s?.harga) || 0), 0);
 const sumBookingProductTotal = (booking) =>
-  (booking?.products || []).reduce((sum, p) => sum + (Number(p?.harga) || 0) * (Number(p?.qty) || 0), 0);
+  (booking?.products || []).reduce((sum, p) => {
+    if (p?.isCompliment) return sum;
+    return sum + (Number(p?.harga) || 0) * (Number(p?.qty) || 0);
+  }, 0);
 
 const isTransactionNotSupported = (err) => {
   const message = String(err?.message || "");
@@ -578,7 +593,15 @@ app.get(
   "/api/services",
   asyncHandler(async (_, res) => {
     const rows = await Service.find().sort({ createdAt: -1 }).lean();
-    res.json(rows.map((r) => ({ id: String(r._id), kode: r.kode, nama: r.nama, harga: r.harga })));
+    res.json(
+      rows.map((r) => ({
+        id: String(r._id),
+        kode: r.kode,
+        nama: r.nama,
+        harga: r.harga,
+        compliments: Array.isArray(r.compliments) ? r.compliments : [],
+      })),
+    );
   }),
 );
 
@@ -874,8 +897,30 @@ app.post(
   "/api/services",
   requireLevels("Owner", "Admin"),
   asyncHandler(async (req, res) => {
-    const created = await Service.create(req.body);
-    res.status(201).json({ id: String(created._id), kode: created.kode, nama: created.nama, harga: created.harga });
+    const complimentsRaw = Array.isArray(req.body?.compliments) ? req.body.compliments : [];
+    const complimentsMap = new Map();
+    for (const c of complimentsRaw) {
+      const kode = String(c?.kode || "").trim();
+      const qty = Number(c?.qty ?? 1);
+      if (!kode) continue;
+      const qtySafe = Number.isFinite(qty) && qty > 0 ? Math.floor(qty) : 1;
+      complimentsMap.set(kode, (complimentsMap.get(kode) || 0) + qtySafe);
+    }
+    const payload = {
+      kode: req.body?.kode,
+      nama: req.body?.nama,
+      harga: req.body?.harga,
+      compliments: Array.from(complimentsMap.entries()).map(([kode, qty]) => ({ kode, qty })),
+    };
+
+    const created = await Service.create(payload);
+    res.status(201).json({
+      id: String(created._id),
+      kode: created.kode,
+      nama: created.nama,
+      harga: created.harga,
+      compliments: created.compliments || [],
+    });
   }),
 );
 
@@ -885,9 +930,30 @@ app.put(
   asyncHandler(async (req, res) => {
     const _id = toObjectId(req.params.id);
     if (!_id) return res.status(400).json({ message: "ID tidak valid" });
-    const updated = await Service.findByIdAndUpdate(_id, req.body, { new: true, runValidators: true }).lean();
+    const complimentsRaw = Array.isArray(req.body?.compliments) ? req.body.compliments : [];
+    const complimentsMap = new Map();
+    for (const c of complimentsRaw) {
+      const kode = String(c?.kode || "").trim();
+      const qty = Number(c?.qty ?? 1);
+      if (!kode) continue;
+      const qtySafe = Number.isFinite(qty) && qty > 0 ? Math.floor(qty) : 1;
+      complimentsMap.set(kode, (complimentsMap.get(kode) || 0) + qtySafe);
+    }
+    const payload = {
+      nama: req.body?.nama,
+      harga: req.body?.harga,
+      compliments: Array.from(complimentsMap.entries()).map(([kode, qty]) => ({ kode, qty })),
+    };
+
+    const updated = await Service.findByIdAndUpdate(_id, payload, { new: true, runValidators: true }).lean();
     if (!updated) return res.status(404).json({ message: "Data tidak ditemukan" });
-    res.json({ id: String(updated._id), kode: updated.kode, nama: updated.nama, harga: updated.harga });
+    res.json({
+      id: String(updated._id),
+      kode: updated.kode,
+      nama: updated.nama,
+      harga: updated.harga,
+      compliments: updated.compliments || [],
+    });
   }),
 );
 
@@ -994,6 +1060,7 @@ app.get(
       customerName: booking.customerName || "",
       phone: booking.phone || "",
       services: booking.services || [],
+      products: booking.products || [],
       branch: branch
         ? { id: String(branch._id), nama: branch.nama, alamat: branch.alamat, noHp: branch.noHp, domain: branch.domain }
         : null,
@@ -1418,6 +1485,53 @@ app.post(
       customerId = customer?._id;
     }
 
+    const requestedServices = Array.isArray(req.body?.services) ? req.body.services : [];
+    const serviceCodes = requestedServices
+      .map((s) => String(s?.kode || "").trim())
+      .filter(Boolean);
+
+    // Auto-add compliment products based on selected services (harga 0, tetap mengurangi stok saat bayar)
+    let complimentProducts = [];
+    if (serviceCodes.length > 0) {
+      const serviceMasters = await Service.find({ kode: { $in: serviceCodes } })
+        .select("kode compliments")
+        .lean();
+      const complimentQtyMap = new Map();
+      for (const svc of serviceMasters) {
+        for (const c of svc?.compliments || []) {
+          const kode = String(c?.kode || "").trim();
+          const qty = Number(c?.qty ?? 1);
+          if (!kode) continue;
+          const qtySafe = Number.isFinite(qty) && qty > 0 ? Math.floor(qty) : 1;
+          complimentQtyMap.set(kode, (complimentQtyMap.get(kode) || 0) + qtySafe);
+        }
+      }
+
+      if (complimentQtyMap.size > 0) {
+        const productCodes = Array.from(complimentQtyMap.keys());
+        const productRows = await Product.find({ kode: { $in: productCodes } }).lean();
+        const productMap = new Map(productRows.map((p) => [p.kode, p]));
+        complimentProducts = productCodes
+          .map((kode) => {
+            const row = productMap.get(kode);
+            if (!row) return null;
+            return {
+              kode: row.kode,
+              nama: row.nama,
+              harga: 0,
+              qty: complimentQtyMap.get(kode) || 1,
+              isCompliment: true,
+            };
+          })
+          .filter(Boolean);
+
+        if (complimentProducts.length !== complimentQtyMap.size) {
+          const missing = productCodes.filter((c) => !productMap.has(c));
+          console.warn("Compliment products missing in master product. Skipped.", { missing, serviceCodes, bookingCode });
+        }
+      }
+    }
+
     const payload = {
       bookingCode,
       antrian,
@@ -1428,7 +1542,8 @@ app.post(
       employeeName: "",
       branchId: branch?._id,
       branchDomain: branch?.domain,
-      services: req.body.services || [],
+      services: requestedServices,
+      products: complimentProducts,
       status: "Menunggu",
       tgl_system: queueDate,
       paymentStatus: "Unpaid",
@@ -1436,29 +1551,30 @@ app.post(
     };
     const created = await Booking.create(payload);
 
-    const ticketLink = `${webPublicBaseUrl.replace(/\/+$/, "")}/ticket/${created.shareToken}`;
-    const waText = [
-      "TIKET ANTREAN",
-      branch?.nama ? `Cabang: ${branch.nama}` : null,
-      `Kode: ${created.bookingCode}`,
-      `Nomor: ${created.antrian}`,
-      `Nama: ${created.customerName}`,
-      "",
-      "Link tiket:",
-      ticketLink,
-    ]
-      .filter(Boolean)
-      .join("\n");
     if (created.phone) {
       setImmediate(() => {
-        waGateway
-          .sendText(created.phone, waText)
-          .then((ok) => {
-            if (!ok) console.warn("WA send failed (booking)", { bookingCode: created.bookingCode, phone: created.phone, wa: waGateway.getStatus() });
-          })
-          .catch((err) =>
-            console.warn("WA send error (booking)", { bookingCode: created.bookingCode, error: err?.message || String(err), wa: waGateway.getStatus() }),
-          );
+        void (async () => {
+          const bookingObj = created.toObject();
+          const pdf = await buildTicketPdf({ booking: bookingObj, branch });
+          const caption = [
+            "TIKET ANTREAN",
+            branch?.nama ? `Cabang: ${branch.nama}` : null,
+            `Kode: ${created.bookingCode}`,
+            `Nomor: ${created.antrian}`,
+            `Nama: ${created.customerName}`,
+          ]
+            .filter(Boolean)
+            .join("\n");
+
+          const ok = await waGateway.sendDocument(created.phone, pdf, {
+            fileName: `tiket_${created.bookingCode}.pdf`,
+            caption,
+            mimetype: "application/pdf",
+          });
+          if (!ok) console.warn("WA send failed (booking)", { bookingCode: created.bookingCode, phone: created.phone, wa: waGateway.getStatus() });
+        })().catch((err) =>
+          console.warn("WA send error (booking)", { bookingCode: created.bookingCode, error: err?.message || String(err), wa: waGateway.getStatus() }),
+        );
       });
     }
 
@@ -1561,6 +1677,7 @@ app.post(
 
     const productKode = String(req.body?.productKode || "").trim();
     const qty = Number(req.body?.qty ?? 1);
+    const isCompliment = Boolean(req.body?.isCompliment);
     if (!productKode) return res.status(400).json({ message: "Kode produk wajib diisi" });
     if (!Number.isFinite(qty) || qty <= 0) return res.status(400).json({ message: "Qty tidak valid" });
 
@@ -1571,7 +1688,9 @@ app.post(
     const product = await Product.findOne({ kode: productKode }).lean();
     if (!product) return res.status(404).json({ message: "Produk tidak ditemukan" });
 
-    const existingIndex = (booking.products || []).findIndex((p) => p.kode === product.kode);
+    const existingIndex = (booking.products || []).findIndex(
+      (p) => p.kode === product.kode && Boolean(p.isCompliment) === isCompliment,
+    );
     if (existingIndex >= 0) {
       const path = `products.${existingIndex}.qty`;
       await Booking.updateOne({ _id: booking._id }, { $inc: { [path]: qty } });
@@ -1583,8 +1702,9 @@ app.post(
             products: {
               kode: product.kode,
               nama: product.nama,
-              harga: product.harga,
+              harga: isCompliment ? 0 : product.harga,
               qty,
+              isCompliment,
             },
           },
         },
@@ -1613,7 +1733,17 @@ app.delete(
     if (!booking) return res.status(404).json({ message: "Data tidak ditemukan" });
     if (booking.paymentStatus === "Paid") return res.status(409).json({ message: "Booking sudah dibayar" });
 
-    await Booking.updateOne({ _id: booking._id }, { $pull: { products: { kode } } });
+    const isComplimentParam = req.query?.isCompliment;
+    const hasIsCompliment = isComplimentParam !== undefined;
+    const isCompliment =
+      hasIsCompliment && String(isComplimentParam).trim() !== ""
+        ? ["1", "true", "yes", "y", "on"].includes(String(isComplimentParam).toLowerCase())
+        : false;
+
+    await Booking.updateOne(
+      { _id: booking._id },
+      { $pull: { products: hasIsCompliment ? { kode, isCompliment } : { kode } } },
+    );
     const updated = await Booking.findById(booking._id).lean();
     res.json({
       id: String(updated._id),
@@ -1652,12 +1782,20 @@ app.post(
     // Validate stock (best-effort; actual decrement happens later)
     const bookingProducts = booking.products || [];
     if (bookingProducts.length > 0) {
-      const products = await Product.find({ kode: { $in: bookingProducts.map((p) => p.kode) } }).lean();
-      const map = Object.fromEntries(products.map((p) => [p.kode, p]));
+      const requiredMap = new Map();
       for (const item of bookingProducts) {
-        const p = map[item.kode];
-        if (!p) return res.status(400).json({ message: `Produk ${item.kode} tidak ditemukan` });
-        if ((p.stok || 0) < (item.qty || 0)) return res.status(400).json({ message: `Stok produk ${p.nama} tidak cukup` });
+        const kode = String(item?.kode || "").trim();
+        const qty = Number(item?.qty) || 0;
+        if (!kode || qty <= 0) continue;
+        requiredMap.set(kode, (requiredMap.get(kode) || 0) + qty);
+      }
+
+      const products = await Product.find({ kode: { $in: Array.from(requiredMap.keys()) } }).lean();
+      const map = Object.fromEntries(products.map((p) => [p.kode, p]));
+      for (const [kode, needQty] of requiredMap.entries()) {
+        const p = map[kode];
+        if (!p) return res.status(400).json({ message: `Produk ${kode} tidak ditemukan` });
+        if ((p.stok || 0) < needQty) return res.status(400).json({ message: `Stok produk ${p.nama} tidak cukup` });
       }
     }
 
@@ -1687,13 +1825,15 @@ app.post(
           nama: s.nama,
           harga: Number(s.harga) || 0,
           qty: 1,
+          isCompliment: false,
         })),
         ...(booking.products || []).map((p) => ({
           type: "product",
           kode: p.kode,
           nama: p.nama,
-          harga: Number(p.harga) || 0,
+          harga: p.isCompliment ? 0 : Number(p.harga) || 0,
           qty: Number(p.qty) || 1,
+          isCompliment: Boolean(p.isCompliment),
         })),
       ],
       total,
@@ -1722,15 +1862,21 @@ app.post(
         salePayload.loyaltyEarnedRp = loyaltyEarnedRp;
         createdSale = await Sale.create([salePayload], { session }).then((rows) => rows[0]);
 
+        const requiredMap = new Map();
         for (const item of booking.products || []) {
-          const qty = Number(item.qty) || 0;
-          if (!qty) continue;
+          const kode = String(item?.kode || "").trim();
+          const qty = Number(item?.qty) || 0;
+          if (!kode || qty <= 0) continue;
+          requiredMap.set(kode, (requiredMap.get(kode) || 0) + qty);
+        }
+
+        for (const [kode, qty] of requiredMap.entries()) {
           const updatedProduct = await Product.findOneAndUpdate(
-            { kode: item.kode, stok: { $gte: qty } },
+            { kode, stok: { $gte: qty } },
             { $inc: { stok: -qty } },
             { new: true, session },
           ).lean();
-          if (!updatedProduct) throw new Error(`Stok produk ${item.kode} tidak cukup`);
+          if (!updatedProduct) throw new Error(`Stok produk ${kode} tidak cukup`);
 
           await StockMovement.create(
             [
@@ -1792,15 +1938,21 @@ app.post(
           throw dupErr;
         }
 
+        const requiredMap = new Map();
         for (const item of booking.products || []) {
-          const qty = Number(item.qty) || 0;
-          if (!qty) continue;
+          const kode = String(item?.kode || "").trim();
+          const qty = Number(item?.qty) || 0;
+          if (!kode || qty <= 0) continue;
+          requiredMap.set(kode, (requiredMap.get(kode) || 0) + qty);
+        }
+
+        for (const [kode, qty] of requiredMap.entries()) {
           const updatedProduct = await Product.findOneAndUpdate(
-            { kode: item.kode, stok: { $gte: qty } },
+            { kode, stok: { $gte: qty } },
             { $inc: { stok: -qty } },
             { new: true },
           ).lean();
-          if (!updatedProduct) return res.status(400).json({ message: `Stok produk ${item.kode} tidak cukup` });
+          if (!updatedProduct) return res.status(400).json({ message: `Stok produk ${kode} tidak cukup` });
           await StockMovement.create({
             productId: updatedProduct._id,
             kode: updatedProduct.kode,
@@ -1836,31 +1988,43 @@ app.post(
 
     const updated = await Booking.findById(booking._id).lean();
 
-    const receiptLink = `${webPublicBaseUrl.replace(/\/+$/, "")}/receipt/${salePayload.shareToken}`;
-    const receiptText = [
-      `STRUK ${salePayload.bookingCode}`,
-      new Date(paidAt).toLocaleString("id-ID"),
-      salePayload.customerName ? `Customer: ${salePayload.customerName}${salePayload.customerPhone ? ` (${salePayload.customerPhone})` : ""}` : null,
-      "",
-      `Total: ${new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(total)}`,
-      `Dibayar: ${new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(received)}`,
-      `Kembalian: ${new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(change)}`,
-      "",
-      "Link struk:",
-      receiptLink,
-    ]
-      .filter(Boolean)
-      .join("\n");
     if (salePayload.customerPhone) {
       setImmediate(() => {
-        waGateway
-          .sendText(salePayload.customerPhone, receiptText)
-          .then((ok) => {
-            if (!ok) console.warn("WA send failed (pay)", { bookingCode: salePayload.bookingCode, phone: salePayload.customerPhone, wa: waGateway.getStatus() });
-          })
-          .catch((err) =>
-            console.warn("WA send error (pay)", { bookingCode: salePayload.bookingCode, error: err?.message || String(err), wa: waGateway.getStatus() }),
-          );
+        void (async () => {
+          const branch = updated?.branchId ? await Branch.findById(updated.branchId).lean() : null;
+          const pdf = await buildReceiptPdf({
+            sale: {
+              bookingCode: salePayload.bookingCode,
+              paidAt,
+              items: salePayload.items || [],
+              total,
+              received,
+              change,
+              customerName: salePayload.customerName || "",
+              customerPhone: salePayload.customerPhone || "",
+            },
+            branch,
+          });
+          const caption = [
+            `STRUK ${salePayload.bookingCode}`,
+            new Date(paidAt).toLocaleString("id-ID"),
+            salePayload.customerName
+              ? `Customer: ${salePayload.customerName}${salePayload.customerPhone ? ` (${salePayload.customerPhone})` : ""}`
+              : null,
+            `Total: ${new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(total)}`,
+          ]
+            .filter(Boolean)
+            .join("\n");
+
+          const ok = await waGateway.sendDocument(salePayload.customerPhone, pdf, {
+            fileName: `struk_${salePayload.bookingCode}.pdf`,
+            caption,
+            mimetype: "application/pdf",
+          });
+          if (!ok) console.warn("WA send failed (pay)", { bookingCode: salePayload.bookingCode, phone: salePayload.customerPhone, wa: waGateway.getStatus() });
+        })().catch((err) =>
+          console.warn("WA send error (pay)", { bookingCode: salePayload.bookingCode, error: err?.message || String(err), wa: waGateway.getStatus() }),
+        );
       });
     }
 
@@ -2041,6 +2205,15 @@ const bootstrap = async () => {
   app.listen(port, () => {
     console.log(`API server running on http://localhost:${port}`);
   });
+
+  // Best-effort: try restore WhatsApp session if auth already exists.
+  waGateway
+    .connect()
+    .then((s) => {
+      if (s?.status === "connected") console.log("WhatsApp connected:", s.me || "");
+      else console.log("WhatsApp status:", s?.status || "unknown");
+    })
+    .catch((err) => console.warn("WhatsApp init failed:", err?.message || String(err)));
 };
 
 bootstrap().catch((err) => {

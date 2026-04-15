@@ -17,13 +17,20 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Plus, Pencil, Trash2 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
-import { api, type Service } from "@/lib/api";
+import { api, type Product, type Service } from "@/lib/api";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 export default function MasterLayanan() {
   const [data, setData] = useState<Service[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Service | null>(null);
-  const [form, setForm] = useState({ kode: "", nama: "", harga: "" });
+  const [form, setForm] = useState<{ kode: string; nama: string; harga: string; compliments: Array<{ kode: string; qty: number }> }>({
+    kode: "",
+    nama: "",
+    harga: "",
+    compliments: [],
+  });
   const [deleteTarget, setDeleteTarget] = useState<Service | null>(null);
   const formatRupiahInput = (value: string) => {
     const digits = value.replace(/\D/g, "");
@@ -46,6 +53,13 @@ export default function MasterLayanan() {
 
   useEffect(() => {
     void loadServices();
+    void (async () => {
+      try {
+        setProducts(await api.getProducts());
+      } catch {
+        // ignore; compliments UI will be disabled if products can't be loaded
+      }
+    })();
   }, []);
 
   const handleSave = async () => {
@@ -53,7 +67,20 @@ export default function MasterLayanan() {
       toast({ title: "Error", description: "Semua field harus diisi", variant: "destructive" });
       return;
     }
-    const item = { kode: form.kode, nama: form.nama, harga: Number(form.harga) };
+    const complimentsMap = new Map<string, number>();
+    for (const c of form.compliments || []) {
+      const kode = String(c?.kode || "").trim();
+      const qty = Number(c?.qty ?? 1);
+      if (!kode) continue;
+      const qtySafe = Number.isFinite(qty) && qty > 0 ? Math.floor(qty) : 1;
+      complimentsMap.set(kode, (complimentsMap.get(kode) || 0) + qtySafe);
+    }
+    const item = {
+      kode: form.kode,
+      nama: form.nama,
+      harga: Number(form.harga),
+      compliments: Array.from(complimentsMap.entries()).map(([kode, qty]) => ({ kode, qty })),
+    };
 
     try {
       if (editing) {
@@ -64,7 +91,7 @@ export default function MasterLayanan() {
         toast({ title: "Berhasil", description: "Layanan baru ditambahkan" });
       }
       await loadServices();
-      setForm({ kode: "", nama: "", harga: "" });
+      setForm({ kode: "", nama: "", harga: "", compliments: [] });
       setEditing(null);
       setOpen(false);
     } catch (error) {
@@ -98,13 +125,13 @@ export default function MasterLayanan() {
 
   const openEdit = (l: Service) => {
     setEditing(l);
-    setForm({ kode: l.kode, nama: l.nama, harga: String(l.harga) });
+    setForm({ kode: l.kode, nama: l.nama, harga: String(l.harga), compliments: l.compliments || [] });
     setOpen(true);
   };
 
   const openAdd = () => {
     setEditing(null);
-    setForm({ kode: "", nama: "", harga: "" });
+    setForm({ kode: "", nama: "", harga: "", compliments: [] });
     setOpen(true);
   };
 
@@ -140,6 +167,52 @@ export default function MasterLayanan() {
                   value={formatRupiahInput(form.harga)}
                   onChange={(e) => setForm({ ...form, harga: sanitizeRupiahInput(e.target.value) })}
                 />
+              </div>
+              <div className="space-y-2">
+                <Label>Compliment (Produk)</Label>
+                {products.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">Master produk belum ada / tidak bisa dimuat.</p>
+                ) : (
+                  <ScrollArea className="h-40 rounded-md border border-border/50 p-2">
+                    <div className="space-y-2">
+                      {products.map((p) => {
+                        const selected = (form.compliments || []).find((c) => c.kode === p.kode);
+                        return (
+                          <div key={p.id} className="flex items-center justify-between gap-3">
+                            <label className="flex items-center gap-2 text-sm">
+                              <input
+                                type="checkbox"
+                                checked={!!selected}
+                                onChange={(e) => {
+                                  const next = e.target.checked
+                                    ? [...(form.compliments || []), { kode: p.kode, qty: 1 }]
+                                    : (form.compliments || []).filter((c) => c.kode !== p.kode);
+                                  setForm({ ...form, compliments: next });
+                                }}
+                              />
+                              <span>
+                                {p.nama} <span className="text-xs text-muted-foreground">({p.kode})</span>
+                              </span>
+                            </label>
+                            <Input
+                              value={String(selected?.qty ?? 1)}
+                              autoUppercase={false}
+                              inputMode="numeric"
+                              className="w-20"
+                              disabled={!selected}
+                              onChange={(e) => {
+                                const qty = Number(e.target.value.replace(/\D/g, "")) || 1;
+                                const next = (form.compliments || []).map((c) => (c.kode === p.kode ? { ...c, qty } : c));
+                                setForm({ ...form, compliments: next });
+                              }}
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </ScrollArea>
+                )}
+                <p className="text-xs text-muted-foreground">Produk compliment harga 0, tetapi stok tetap berkurang saat pembayaran.</p>
               </div>
               <Button onClick={handleSave} className="w-full bg-accent text-accent-foreground hover:bg-accent/90">Simpan</Button>
             </div>

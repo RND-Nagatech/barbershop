@@ -6,7 +6,7 @@ export type ReceiptData = {
   paidAt: string;
   customerName?: string;
   customerPhone?: string;
-  items: Array<{ type: "service" | "product"; kode: string; nama: string; harga: number; qty: number }>;
+  items: Array<{ type: "service" | "product"; kode: string; nama: string; harga: number; qty: number; isCompliment?: boolean }>;
   total: number;
   received: number;
   change: number;
@@ -27,7 +27,7 @@ export function generateReceiptPdf(receipt: ReceiptData) {
   }
 
   const rows = receipt.items.map((it) => [
-    it.nama,
+    it.type === "product" && it.isCompliment ? `${it.nama} (Compliment)` : it.nama,
     String(it.qty),
     formatRp(it.harga),
     formatRp(it.harga * it.qty),
@@ -59,8 +59,9 @@ export function generateReceiptPdf(receipt: ReceiptData) {
 export function openReceiptPrintWindow(receipt: ReceiptData) {
   const lines = receipt.items
     .map((it) => {
+      const name = it.type === "product" && it.isCompliment ? `${it.nama} (Compliment)` : it.nama;
       const subtotal = formatRp(it.harga * it.qty);
-      return `<tr><td>${escapeHtml(it.nama)}</td><td style="text-align:right">${it.qty}</td><td style="text-align:right">${subtotal}</td></tr>`;
+      return `<tr><td>${escapeHtml(name)}</td><td style="text-align:right">${it.qty}</td><td style="text-align:right">${subtotal}</td></tr>`;
     })
     .join("");
 
@@ -127,7 +128,10 @@ export function buildReceiptText(receipt: ReceiptData) {
       : "";
   const header = `Struk ${receipt.bookingCode}\n${new Date(receipt.paidAt).toLocaleString("id-ID")}\n${customerLine}`;
   const items = receipt.items
-    .map((it) => `- ${it.nama} x${it.qty} = ${formatRp(it.harga * it.qty)}`)
+    .map((it) => {
+      const name = it.type === "product" && it.isCompliment ? `${it.nama} (Compliment)` : it.nama;
+      return `- ${name} x${it.qty} = ${formatRp(it.harga * it.qty)}`;
+    })
     .join("\n");
   const footer = `\n\nTotal: ${formatRp(receipt.total)}\nDibayar: ${formatRp(receipt.received)}\nKembalian: ${formatRp(receipt.change)}`;
   return `${header}\n${items}${footer}`;
