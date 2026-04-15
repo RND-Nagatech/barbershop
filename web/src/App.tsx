@@ -26,6 +26,9 @@ import NotFound from "./pages/NotFound";
 import PublicBooking from "./pages/PublicBooking";
 import KasirPembayaran from "./pages/KasirPembayaran";
 import TvQueue from "./pages/TvQueue";
+import PublicTicketPage from "./pages/PublicTicket";
+import PublicReceiptPage from "./pages/PublicReceipt";
+import WhatsAppGateway from "./pages/WhatsAppGateway";
 
 const queryClient = new QueryClient();
 
@@ -39,6 +42,8 @@ const App = () => (
           <Route path="/" element={<Login />} />
           <Route path="/book" element={<PublicBooking />} />
           <Route path="/tv" element={<TvQueue />} />
+          <Route path="/ticket/:token" element={<PublicTicketPage />} />
+          <Route path="/receipt/:token" element={<PublicReceiptPage />} />
           <Route element={<AppLayout />}>
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/master/pegawai" element={<MasterPegawai />} />
@@ -58,6 +63,7 @@ const App = () => (
             <Route path="/setting/komisi" element={<SettingKomisi />} />
             <Route path="/setting/loyalty" element={<SettingLoyalty />} />
             <Route path="/setting/cabang" element={<DataCabang />} />
+            <Route path="/setting/whatsapp" element={<WhatsAppGateway />} />
           </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>

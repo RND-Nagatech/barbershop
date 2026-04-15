@@ -4,11 +4,21 @@ import cors from "cors";
 import morgan from "morgan";
 import mongoose from "mongoose";
 import crypto from "crypto";
+import { waGateway } from "./waGateway.js";
+
+process.on("unhandledRejection", (reason) => {
+  console.error("UnhandledRejection:", reason);
+});
+
+process.on("uncaughtException", (err) => {
+  console.error("UncaughtException:", err);
+});
 
 const app = express();
 const port = Number(process.env.PORT || 3001);
 const mongoUri = process.env.MONGODB_URI;
 const jwtSecret = process.env.JWT_SECRET || "dev-secret-change-me";
+const webPublicBaseUrl = process.env.WEB_PUBLIC_BASE_URL || "http://localhost:8080";
 
 if (!mongoUri) {
   throw new Error("MONGODB_URI is required in environment variables");
@@ -16,6 +26,9 @@ if (!mongoUri) {
 
 if (!process.env.JWT_SECRET) {
   console.warn("JWT_SECRET is not set. Using an insecure default; set JWT_SECRET in server/.env for real usage.");
+}
+if (!process.env.WEB_PUBLIC_BASE_URL) {
+  console.warn("WEB_PUBLIC_BASE_URL is not set. WhatsApp links may not work on customer phones. Set it in server/.env.");
 }
 
 app.use(
@@ -123,8 +136,12 @@ const apiGuard = (req, res, next) => {
     (method === "GET" && path === "/health") ||
     (method === "POST" && path === "/auth/login") ||
     (method === "GET" && path === "/queue/today") ||
+    (method === "GET" && path === "/public/branch") ||
+    (method === "GET" && path.startsWith("/public/ticket/")) ||
+    (method === "GET" && path.startsWith("/public/receipt/")) ||
     (method === "GET" && path === "/branches/by-domain") ||
     (method === "GET" && path === "/services") ||
+    (method === "GET" && path === "/bookings/public") ||
     (method === "POST" && path === "/bookings");
 
   if (isPublic) return next();
@@ -271,6 +288,7 @@ const saleSchema = new mongoose.Schema(
     voidReason: { type: String, trim: true, default: "" },
     voidedBy: { type: String, trim: true, default: "" },
     loyaltyEarnedRp: { type: Number, default: 0, min: 0 },
+    shareToken: { type: String, trim: true },
   },
   { timestamps: true },
 );
@@ -279,6 +297,7 @@ saleSchema.index(
   { unique: true, partialFilterExpression: { status: "Paid" } },
 );
 saleSchema.index({ paidYmd: 1 });
+saleSchema.index({ shareToken: 1 }, { unique: true, sparse: true });
 
 const bookingServiceSchema = new mongoose.Schema(
   {
@@ -306,6 +325,7 @@ const bookingSchema = new mongoose.Schema(
     customerName: { type: String, required: true, trim: true },
     phone: { type: String, default: "" },
     customerId: { type: mongoose.Schema.Types.ObjectId, ref: "Customer" },
+    shareToken: { type: String, trim: true },
     employeeName: { type: String, default: "" },
     branchId: { type: mongoose.Schema.Types.ObjectId, ref: "Branch" },
     branchDomain: { type: String, trim: true },
@@ -324,6 +344,7 @@ const bookingSchema = new mongoose.Schema(
   { timestamps: true },
 );
 bookingSchema.index({ tgl_system: 1, bookingCode: 1 }, { unique: true });
+bookingSchema.index({ shareToken: 1 }, { unique: true, sparse: true });
 
 const Employee = mongoose.model("Employee", employeeSchema);
 const Service = mongoose.model("Service", serviceSchema);
@@ -394,6 +415,8 @@ const formatBookingCode = ({ queueDate, antrian }) => {
   return `BK-${yymmdd}-${seq}`;
 };
 
+const generateShareToken = () => crypto.randomBytes(18).toString("hex");
+
 const sumBookingTotal = (booking) => (booking?.services || []).reduce((sum, s) => sum + (Number(s?.harga) || 0), 0);
 const sumBookingProductTotal = (booking) =>
   (booking?.products || []).reduce((sum, p) => sum + (Number(p?.harga) || 0) * (Number(p?.qty) || 0), 0);
@@ -405,7 +428,8 @@ const isTransactionNotSupported = (err) => {
     message.includes("Transactions are not supported") ||
     message.includes("requires a replica set") ||
     message.includes("replica set") ||
-    message.includes("mongos")
+    message.includes("mongos") ||
+    message.includes("Read preference in a transaction must be primary")
   );
 };
 
@@ -447,6 +471,65 @@ app.post(
       },
       token,
     });
+  }),
+);
+
+app.post(
+  "/api/wa/connect",
+  requireLevels("Owner", "Admin"),
+  asyncHandler(async (_req, res) => {
+    const status = await waGateway.connect({ wait: true });
+    res.json({ status: status.status, me: status.me || "", lastError: status.lastError || "" });
+  }),
+);
+
+app.get(
+  "/api/wa/status",
+  requireLevels("Owner", "Admin"),
+  asyncHandler(async (_req, res) => {
+    const s = waGateway.getStatus();
+    res.json({ status: s.status, me: s.me || "", lastError: s.lastError || "" });
+  }),
+);
+
+app.get(
+  "/api/wa/qr",
+  requireLevels("Owner", "Admin"),
+  asyncHandler(async (_req, res) => {
+    const st = await waGateway.ensureQr({ timeoutMs: 20000 });
+    res.json({
+      qrDataUrl: st.qrDataUrl || "",
+      status: st.status,
+      me: st.me || "",
+      lastError: st.lastError || "",
+      lastErrorDetail: st.lastErrorDetail || null,
+    });
+  }),
+);
+
+app.post(
+  "/api/wa/refresh-qr",
+  requireLevels("Owner", "Admin"),
+  asyncHandler(async (_req, res) => {
+    await waGateway.logout();
+    await waGateway.connect({ wait: true });
+    const st = waGateway.getState();
+    res.json({
+      qrDataUrl: st.qrDataUrl || "",
+      status: st.status,
+      me: st.me || "",
+      lastError: st.lastError || "",
+      lastErrorDetail: st.lastErrorDetail || null,
+    });
+  }),
+);
+
+app.post(
+  "/api/wa/logout",
+  requireLevels("Owner", "Admin"),
+  asyncHandler(async (_req, res) => {
+    const status = await waGateway.logout();
+    res.json(status);
   }),
 );
 
@@ -710,7 +793,7 @@ app.post(
 
     const productItems = (sale.items || []).filter((i) => i.type === "product");
 
-    const session = await mongoose.startSession();
+    const session = await mongoose.startSession({ defaultTransactionOptions: { readPreference: "primary" } });
     try {
       await session.withTransaction(async () => {
         await Sale.updateOne(
@@ -751,7 +834,7 @@ app.post(
           { $set: { paymentStatus: "Unpaid", paidAt: null, paidYmd: "" } },
           { session },
         );
-      });
+      }, { readPreference: "primary" });
     } catch (err) {
       if (!isTransactionNotSupported(err)) throw err;
 
@@ -883,6 +966,64 @@ app.get(
     const row = await Branch.findOne({ domain }).lean();
     if (!row) return res.status(404).json({ message: "Cabang tidak ditemukan" });
     res.json({ id: String(row._id), nama: row.nama, alamat: row.alamat, noHp: row.noHp, domain: row.domain });
+  }),
+);
+
+app.get(
+  "/api/public/branch",
+  asyncHandler(async (_req, res) => {
+    const row = await Branch.findOne().sort({ createdAt: -1 }).lean();
+    if (!row) return res.status(404).json({ message: "Cabang tidak ditemukan" });
+    res.json({ id: String(row._id), nama: row.nama, alamat: row.alamat, noHp: row.noHp, domain: row.domain });
+  }),
+);
+
+app.get(
+  "/api/public/ticket/:token",
+  asyncHandler(async (req, res) => {
+    const token = String(req.params.token || "").trim();
+    if (!token) return res.status(400).json({ message: "Token tidak valid" });
+    const booking = await Booking.findOne({ shareToken: token }).lean();
+    if (!booking) return res.status(404).json({ message: "Tiket tidak ditemukan" });
+    const branch = booking.branchId ? await Branch.findById(booking.branchId).lean() : null;
+    res.json({
+      bookingCode: booking.bookingCode,
+      antrian: booking.antrian,
+      status: booking.status,
+      createdAt: booking.createdAt,
+      customerName: booking.customerName || "",
+      phone: booking.phone || "",
+      services: booking.services || [],
+      branch: branch
+        ? { id: String(branch._id), nama: branch.nama, alamat: branch.alamat, noHp: branch.noHp, domain: branch.domain }
+        : null,
+    });
+  }),
+);
+
+app.get(
+  "/api/public/receipt/:token",
+  asyncHandler(async (req, res) => {
+    const token = String(req.params.token || "").trim();
+    if (!token) return res.status(400).json({ message: "Token tidak valid" });
+    const sale = await Sale.findOne({ shareToken: token }).lean();
+    if (!sale) return res.status(404).json({ message: "Struk tidak ditemukan" });
+    const booking = sale.bookingId ? await Booking.findById(sale.bookingId).lean() : null;
+    const branch = booking?.branchId ? await Branch.findById(booking.branchId).lean() : null;
+    res.json({
+      bookingCode: sale.bookingCode,
+      paidAt: sale.paidAt,
+      paidYmd: sale.paidYmd,
+      items: sale.items || [],
+      total: sale.total || 0,
+      received: sale.received || 0,
+      change: sale.change || 0,
+      customerName: sale.customerName || "",
+      customerPhone: sale.customerPhone || "",
+      branch: branch
+        ? { id: String(branch._id), nama: branch.nama, alamat: branch.alamat, noHp: branch.noHp, domain: branch.domain }
+        : null,
+    });
   }),
 );
 
@@ -1188,6 +1329,37 @@ app.get(
   }),
 );
 
+app.get(
+  "/api/bookings/public",
+  asyncHandler(async (req, res) => {
+    const codesRaw = String(req.query.codes || "").trim();
+    if (!codesRaw) return res.json([]);
+    const codes = Array.from(
+      new Set(
+        codesRaw
+          .split(",")
+          .map((x) => x.trim())
+          .filter(Boolean),
+      ),
+    ).slice(0, 20);
+
+    const rows = await Booking.find({ bookingCode: { $in: codes } })
+      .select("bookingCode antrian status employeeName paidAt paymentStatus")
+      .lean();
+
+    res.json(
+      rows.map((r) => ({
+        bookingCode: r.bookingCode,
+        antrian: r.antrian,
+        status: r.status,
+        employeeName: r.employeeName || "",
+        paymentStatus: r.paymentStatus || "Unpaid",
+        paidAt: r.paidAt,
+      })),
+    );
+  }),
+);
+
 const maskCustomerName = (value) => {
   const name = String(value || "").trim();
   if (!name) return "";
@@ -1252,6 +1424,7 @@ app.post(
       customerName: req.body.customerName,
       phone: phone || "",
       customerId,
+      shareToken: generateShareToken(),
       employeeName: "",
       branchId: branch?._id,
       branchDomain: branch?.domain,
@@ -1262,6 +1435,33 @@ app.post(
       paidYmd: "",
     };
     const created = await Booking.create(payload);
+
+    const ticketLink = `${webPublicBaseUrl.replace(/\/+$/, "")}/ticket/${created.shareToken}`;
+    const waText = [
+      "TIKET ANTREAN",
+      branch?.nama ? `Cabang: ${branch.nama}` : null,
+      `Kode: ${created.bookingCode}`,
+      `Nomor: ${created.antrian}`,
+      `Nama: ${created.customerName}`,
+      "",
+      "Link tiket:",
+      ticketLink,
+    ]
+      .filter(Boolean)
+      .join("\n");
+    if (created.phone) {
+      setImmediate(() => {
+        waGateway
+          .sendText(created.phone, waText)
+          .then((ok) => {
+            if (!ok) console.warn("WA send failed (booking)", { bookingCode: created.bookingCode, phone: created.phone, wa: waGateway.getStatus() });
+          })
+          .catch((err) =>
+            console.warn("WA send error (booking)", { bookingCode: created.bookingCode, error: err?.message || String(err), wa: waGateway.getStatus() }),
+          );
+      });
+    }
+
     res.status(201).json({
       id: String(created._id),
       bookingCode: created.bookingCode,
@@ -1479,6 +1679,7 @@ app.post(
       customerId,
       customerName: booking.customerName || "",
       customerPhone: booking.phone || "",
+      shareToken: generateShareToken(),
       items: [
         ...(booking.services || []).map((s) => ({
           type: "service",
@@ -1507,7 +1708,7 @@ app.post(
     // Attempt to apply stock changes and create sale atomically (transaction when possible).
     let createdSale = null;
     let loyaltyEarnedRp = 0;
-    const session = await mongoose.startSession();
+    const session = await mongoose.startSession({ defaultTransactionOptions: { readPreference: "primary" } });
     try {
       await session.withTransaction(async () => {
         const loyalty = (await LoyaltySetting.findOne().session(session).lean()) || { tipe: "persentase", nilai: 1 };
@@ -1571,7 +1772,7 @@ app.post(
             { session },
           );
         }
-      });
+      }, { readPreference: "primary" });
     } catch (err) {
       if (isTransactionNotSupported(err)) {
         // Fallback for standalone MongoDB (no transactions).
@@ -1634,6 +1835,34 @@ app.post(
     }
 
     const updated = await Booking.findById(booking._id).lean();
+
+    const receiptLink = `${webPublicBaseUrl.replace(/\/+$/, "")}/receipt/${salePayload.shareToken}`;
+    const receiptText = [
+      `STRUK ${salePayload.bookingCode}`,
+      new Date(paidAt).toLocaleString("id-ID"),
+      salePayload.customerName ? `Customer: ${salePayload.customerName}${salePayload.customerPhone ? ` (${salePayload.customerPhone})` : ""}` : null,
+      "",
+      `Total: ${new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(total)}`,
+      `Dibayar: ${new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(received)}`,
+      `Kembalian: ${new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(change)}`,
+      "",
+      "Link struk:",
+      receiptLink,
+    ]
+      .filter(Boolean)
+      .join("\n");
+    if (salePayload.customerPhone) {
+      setImmediate(() => {
+        waGateway
+          .sendText(salePayload.customerPhone, receiptText)
+          .then((ok) => {
+            if (!ok) console.warn("WA send failed (pay)", { bookingCode: salePayload.bookingCode, phone: salePayload.customerPhone, wa: waGateway.getStatus() });
+          })
+          .catch((err) =>
+            console.warn("WA send error (pay)", { bookingCode: salePayload.bookingCode, error: err?.message || String(err), wa: waGateway.getStatus() }),
+          );
+      });
+    }
 
     res.json({
       id: String(updated._id),

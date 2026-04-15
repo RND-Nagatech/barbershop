@@ -39,6 +39,7 @@ export function AppLayout() {
       [/^\/user\/akses/, "Hak Akses User"],
       [/^\/setting\/komisi/, "Setting Komisi"],
       [/^\/setting\/loyalty/, "Setting Loyalty"],
+      [/^\/setting\/whatsapp/, "WhatsApp Gateway"],
     ];
 
     const match = routeToMenuTitle.find(([re]) => re.test(path));

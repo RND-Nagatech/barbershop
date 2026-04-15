@@ -19,6 +19,7 @@ async function fetchQueue(): Promise<QueueItem[]> {
 export default function TvQueue() {
   const [data, setData] = useState<QueueItem[]>([]);
   const [online, setOnline] = useState(true);
+  const [now, setNow] = useState<Date>(() => new Date());
 
   useEffect(() => {
     let timer: number | undefined;
@@ -39,57 +40,126 @@ export default function TvQueue() {
     };
   }, []);
 
-  const groups = useMemo(() => {
-    const menunggu = data.filter((d) => d.status === "Menunggu");
-    const proses = data.filter((d) => d.status === "Proses");
-    const selesai = data.filter((d) => d.status === "Selesai");
-    return { menunggu, proses, selesai };
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(new Date()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const view = useMemo(() => {
+    const menunggu = data
+      .filter((d) => d.status === "Menunggu")
+      .slice()
+      .sort((a, b) => (a.antrian || 0) - (b.antrian || 0));
+    const proses = data
+      .filter((d) => d.status === "Proses")
+      .slice()
+      .sort((a, b) => (a.antrian || 0) - (b.antrian || 0));
+
+    const current = proses.slice(0, 2);
+    const next = menunggu[0] || null;
+    const upcoming = menunggu.slice(1, 4);
+
+    return { current, next, upcoming };
   }, [data]);
 
-  const Card = ({ title, items, accent }: { title: string; items: QueueItem[]; accent: string }) => (
-    <div className="bg-card rounded-xl border border-border/50 overflow-hidden">
-      <div className={`px-5 py-4 border-b border-border/50 ${accent}`}>
-        <h2 className="font-display text-xl font-semibold">{title}</h2>
-        <p className="text-sm opacity-80">{items.length} antrean</p>
-      </div>
-      <div className="p-5 space-y-3">
-        {items.slice(0, 12).map((q) => (
-          <div key={q.bookingCode} className="flex items-center justify-between rounded-lg border border-border/50 px-4 py-3">
-            <div className="flex items-center gap-4 min-w-0">
-              <div className="w-14 text-center">
-                <div className="text-2xl font-display font-bold text-accent">{q.antrian}</div>
-                <div className="text-[10px] text-muted-foreground">{q.bookingCode}</div>
-              </div>
-              <div className="min-w-0">
-                <div className="text-base font-medium truncate">{q.customerName || "-"}</div>
-                <div className="text-xs text-muted-foreground truncate">{q.employeeName ? `Barber: ${q.employeeName}` : ""}</div>
-              </div>
+  return (
+    <div className="min-h-screen bg-background p-8">
+      <div className="flex items-start justify-between gap-6 mb-8">
+        <div className="min-w-0">
+          <h1 className="font-display text-4xl font-bold tracking-tight">Antrean</h1>
+          <p className="text-muted-foreground text-lg">Update otomatis setiap 2 detik</p>
+        </div>
+        <div className="flex items-center gap-4">
+          <div className="text-right">
+            <div className="font-display text-2xl font-semibold tabular-nums">
+              {now.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}
+            </div>
+            <div className="text-muted-foreground">
+              {now.toLocaleDateString("id-ID", { weekday: "long", year: "numeric", month: "long", day: "2-digit" })}
             </div>
           </div>
-        ))}
-        {items.length === 0 && <div className="text-center text-muted-foreground py-10">Kosong</div>}
-      </div>
-    </div>
-  );
-
-  return (
-    <div className="min-h-screen bg-background p-6">
-      <div className="flex items-start justify-between mb-6">
-        <div>
-          <h1 className="font-display text-3xl font-bold">Antrean Barber</h1>
-          <p className="text-muted-foreground">Update otomatis setiap 2 detik</p>
-        </div>
-        <div className={`px-3 py-1 rounded-full text-sm ${online ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"}`}>
-          {online ? "Online" : "Offline"}
+          <div
+            className={`px-3 py-1 rounded-full text-sm ${
+              online ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"
+            }`}
+          >
+            {online ? "Online" : "Offline"}
+          </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <Card title="Menunggu" items={groups.menunggu} accent="bg-muted/40" />
-        <Card title="Proses" items={groups.proses} accent="bg-warning/10 text-warning" />
-        <Card title="Selesai" items={groups.selesai} accent="bg-success/10 text-success" />
+      <div className="grid grid-cols-1 lg:grid-cols-[1.2fr_0.8fr] gap-6">
+        <div className="space-y-6">
+          <div className="bg-card rounded-2xl border border-border/50 overflow-hidden">
+            <div className="px-6 py-5 border-b border-border/50 bg-warning/10 text-warning">
+              <h2 className="font-display text-2xl font-semibold">Sedang Dilayani</h2>
+              <p className="opacity-80">{view.current.length > 0 ? `${view.current.length} antrean` : "Belum ada"}</p>
+            </div>
+            <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+              {view.current.length === 0 ? (
+                <div className="col-span-full text-center text-muted-foreground py-14 text-xl">—</div>
+              ) : (
+                view.current.map((q) => (
+                  <div key={q.bookingCode} className="rounded-2xl border border-border/50 p-6 flex items-center justify-between">
+                    <div className="min-w-0">
+                      <div className="text-sm text-muted-foreground">Nomor</div>
+                      <div className="font-display text-6xl font-bold tracking-tight tabular-nums">{q.antrian}</div>
+                      <div className="text-muted-foreground truncate">{q.employeeName ? `Barber: ${q.employeeName}` : ""}</div>
+                    </div>
+                    <div className="text-right text-muted-foreground text-sm">
+                      <div>{q.bookingCode}</div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="bg-card rounded-2xl border border-border/50 overflow-hidden">
+            <div className="px-6 py-5 border-b border-border/50 bg-muted/40">
+              <h2 className="font-display text-2xl font-semibold">Antrian Selanjutnya</h2>
+              <p className="text-muted-foreground">Siap dipanggil berikutnya</p>
+            </div>
+            <div className="p-6 flex items-center justify-between">
+              <div className="font-display text-7xl font-bold tracking-tight tabular-nums">{view.next?.antrian ?? "—"}</div>
+              <div className="text-right text-muted-foreground">
+                <div className="text-sm">{view.next?.bookingCode ?? ""}</div>
+              </div>
+            </div>
+            {view.upcoming.length > 0 && (
+              <div className="border-t border-border/50 px-6 py-5">
+                <div className="text-sm text-muted-foreground mb-3">Berikutnya</div>
+                <div className="flex gap-3 flex-wrap">
+                  {view.upcoming.map((q) => (
+                    <div
+                      key={q.bookingCode}
+                      className="rounded-xl border border-border/50 bg-background px-5 py-3 font-display text-3xl font-semibold tabular-nums"
+                    >
+                      {q.antrian}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="bg-card rounded-2xl border border-border/50 overflow-hidden flex flex-col">
+          <div className="px-6 py-5 border-b border-border/50 bg-background">
+            <h2 className="font-display text-2xl font-semibold">Info</h2>
+            <p className="text-muted-foreground">Silakan menunggu sampai nomor dipanggil</p>
+          </div>
+          <div className="p-6 flex-1 flex items-center justify-center text-center">
+            <div className="space-y-3">
+              <div className="font-display text-3xl font-semibold">Terima kasih</div>
+              <div className="text-muted-foreground text-lg">Mohon siapkan diri saat nomor tampil di layar</div>
+            </div>
+          </div>
+          <div className="px-6 py-4 border-t border-border/50 text-sm text-muted-foreground">
+            {online ? "Sinkron dengan server" : "Koneksi terputus — akan mencoba ulang"}
+          </div>
+        </div>
       </div>
     </div>
   );
 }
-

@@ -1,4 +1,4 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:3001/api";
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:3001/api";
 
 type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
@@ -110,6 +110,45 @@ export interface BookingItem {
   paymentStatus: "Unpaid" | "Paid";
   paidAt?: string;
 }
+
+export interface PublicBookingStatus {
+  bookingCode: string;
+  antrian: number;
+  status: "Menunggu" | "Proses" | "Selesai";
+  employeeName: string;
+  paymentStatus: "Unpaid" | "Paid";
+  paidAt?: string;
+}
+
+export type WhatsAppStatus = {
+  status: "disconnected" | "connecting" | "qr" | "connected";
+  me?: string;
+  lastError?: string;
+};
+
+export type PublicTicket = {
+  bookingCode: string;
+  antrian: number;
+  status: "Menunggu" | "Proses" | "Selesai";
+  createdAt: string;
+  customerName: string;
+  phone: string;
+  services: BookingService[];
+  branch: Branch | null;
+};
+
+export type PublicReceipt = {
+  bookingCode: string;
+  paidAt: string;
+  paidYmd: string;
+  items: Array<{ type: "service" | "product"; kode: string; nama: string; harga: number; qty: number }>;
+  total: number;
+  received: number;
+  change: number;
+  customerName: string;
+  customerPhone: string;
+  branch: Branch | null;
+};
 
 export interface DashboardPayload {
   stats: {
@@ -275,11 +314,38 @@ export const api = {
   createBranch: (payload: Omit<Branch, "id">) => request<Branch>("/branches", "POST", payload),
   updateBranch: (id: string, payload: Omit<Branch, "id">) => request<Branch>(`/branches/${id}`, "PUT", payload),
   deleteBranch: (id: string) => request<void>(`/branches/${id}`, "DELETE"),
+  getPublicBranch: () => request<Branch>("/public/branch"),
   getBranchByDomain: (domain: string) => {
     const query = new URLSearchParams();
     query.set("domain", domain);
     return request<Branch>(`/branches/by-domain?${query.toString()}`);
   },
+  getPublicTicket: (token: string) => request<PublicTicket>(`/public/ticket/${encodeURIComponent(token)}`),
+  getPublicReceipt: (token: string) => request<PublicReceipt>(`/public/receipt/${encodeURIComponent(token)}`),
+  waConnect: () => request<WhatsAppStatus>("/wa/connect", "POST"),
+  waStatus: () => request<WhatsAppStatus>("/wa/status"),
+  waQr: () =>
+    request<{
+      qrDataUrl: string;
+      status: WhatsAppStatus["status"];
+      me?: string;
+      lastError?: string;
+      lastErrorDetail?: unknown;
+    }>(
+      "/wa/qr",
+    ),
+  waRefreshQr: () =>
+    request<{
+      qrDataUrl: string;
+      status: WhatsAppStatus["status"];
+      me?: string;
+      lastError?: string;
+      lastErrorDetail?: unknown;
+    }>(
+      "/wa/refresh-qr",
+      "POST",
+    ),
+  waLogout: () => request<WhatsAppStatus>("/wa/logout", "POST"),
 
   getUsers: () => request<UserItem[]>("/users"),
   createUser: (payload: { username: string; password: string; level: string }) => request<UserItem>("/users", "POST", payload),
@@ -317,6 +383,11 @@ export const api = {
     if (params?.branchDomain) query.set("branchDomain", params.branchDomain);
     const suffix = query.toString() ? `?${query.toString()}` : "";
     return request<BookingItem[]>(`/bookings${suffix}`);
+  },
+  getPublicBookings: (codes: string[]) => {
+    const query = new URLSearchParams();
+    query.set("codes", codes.join(","));
+    return request<PublicBookingStatus[]>(`/bookings/public?${query.toString()}`);
   },
   getQueuePreview: () => request<QueuePreview>("/bookings/queue-preview"),
   createBooking: (payload: { customerName: string; phone: string; employeeName?: string; services: BookingService[]; branchDomain?: string }) =>

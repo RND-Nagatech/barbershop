@@ -21,6 +21,7 @@ import {
   Settings,
   LogOut,
   ChevronDown,
+  MessageCircle,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -97,6 +98,7 @@ const menuGroups = [
       { title: "Setting Komisi", url: "/setting/komisi", icon: Settings },
       { title: "Setting Loyalty", url: "/setting/loyalty", icon: Settings },
       { title: "Data Cabang", url: "/setting/cabang", icon: Settings },
+      { title: "WhatsApp Gateway", url: "/setting/whatsapp", icon: MessageCircle },
     ],
   },
 ];

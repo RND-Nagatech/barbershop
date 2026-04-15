@@ -13,10 +13,12 @@
   "description": "",
   "type": "module",
   "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.19",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "mongoose": "^8.23.0",
-    "morgan": "^1.10.1"
+    "morgan": "^1.10.1",
+    "qrcode": "^1.5.4"
   }
 }
