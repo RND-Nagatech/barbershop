@@ -100,11 +100,13 @@ export default function KasirPembayaran() {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return data;
-    return data.filter((b) => {
+    const base = !q
+      ? data
+      : data.filter((b) => {
       const haystack = [b.bookingCode, b.customerName, b.phone, b.employeeName].join(" ").toLowerCase();
       return haystack.includes(q);
     });
+    return base.slice().sort((a, b) => (Number(a.antrian) || 0) - (Number(b.antrian) || 0));
   }, [data, query]);
 
   const totalServices = useMemo(() => (payTarget ? sumServiceTotal(payTarget) : 0), [payTarget]);

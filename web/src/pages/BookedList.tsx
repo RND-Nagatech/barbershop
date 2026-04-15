@@ -31,12 +31,12 @@ export default function BookedList() {
   const [services, setServices] = useState<Service[]>([]);
   const [from, setFrom] = useState(getToday());
   const [to, setTo] = useState(getToday());
-  const [status, setStatus] = useState("Menunggu");
+  const [status, setStatus] = useState<"Aktif" | "Menunggu" | "Proses" | "Selesai">("Aktif");
 
   const loadData = async () => {
     try {
       const [bookings, employeeRows] = await Promise.all([
-        api.getBookings({ from, to, status }),
+        api.getBookings({ from, to }),
         api.getEmployees(),
       ]);
       setData(bookings);
@@ -54,7 +54,7 @@ export default function BookedList() {
   useEffect(() => {
     void loadData();
     // eslint-disable-next-line
-  }, [from, to, status]);
+  }, [from, to]);
 
   const [assignTarget, setAssignTarget] = useState<{ id: string; pegawai: string } | null>(null);
   const [completeTarget, setCompleteTarget] = useState<string | null>(null);
@@ -119,6 +119,118 @@ export default function BookedList() {
     Selesai: "bg-success/10 text-success",
   };
 
+  const sortByAntrianAsc = (a: BookingItem, b: BookingItem) => (Number(a.antrian) || 0) - (Number(b.antrian) || 0);
+  const menungguRows = data.filter((b) => b.status === "Menunggu").slice().sort(sortByAntrianAsc);
+  const prosesRows = data.filter((b) => b.status === "Proses").slice().sort(sortByAntrianAsc);
+  const selesaiRows = data.filter((b) => b.status === "Selesai").slice().sort(sortByAntrianAsc);
+
+  const renderCards = (rows: BookingItem[]) => (
+    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+      {rows.map((b) => (
+        <Card key={b.id} className={`border-border/50 ${b.status === "Selesai" ? "opacity-60" : ""}`}>
+          <CardContent className="p-5">
+            <div className="flex items-start justify-between mb-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-display text-2xl font-bold text-accent">#{b.antrian}</span>
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusVariant[b.status]}`}>
+                    {b.status}
+                  </span>
+                </div>
+                <p className="text-sm text-muted-foreground">{b.bookingCode}</p>
+              </div>
+            </div>
+
+            <div className="space-y-2 mb-4">
+              <p className="text-sm"><span className="text-muted-foreground">Customer:</span> <span className="font-medium">{b.customerName}</span></p>
+              <div className="flex flex-wrap gap-1">
+                {b.services.map((l) => (
+                  <Badge key={l.kode} variant="secondary" className="text-xs">{l.nama}</Badge>
+                ))}
+              </div>
+            </div>
+
+            {b.status === "Menunggu" && (
+              <>
+                <Select onValueChange={(v) => setAssignTarget({ id: b.id, pegawai: v })}>
+                  <SelectTrigger className="text-sm"><SelectValue placeholder="Assign pegawai..." /></SelectTrigger>
+                  <SelectContent>
+                    {employees.map((employee) => (
+                      <SelectItem key={employee.id} value={employee.nama}>{employee.nama}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <AlertDialog open={!!assignTarget && assignTarget?.id === b.id} onOpenChange={(open) => !open && setAssignTarget(null)}>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Proses booking?</AlertDialogTitle>
+                    </AlertDialogHeader>
+                    <div>Booking akan diproses oleh pegawai <b>{assignTarget?.pegawai}</b>. Lanjutkan?</div>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Batal</AlertDialogCancel>
+                      <AlertDialogAction onClick={handleAssign}>Ya, proses</AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </>
+            )}
+
+            {b.status === "Proses" && (
+              <div className="space-y-2">
+                <p className="text-sm"><span className="text-muted-foreground">Pegawai:</span> <span className="font-medium">{b.employeeName}</span></p>
+                <Button
+                  onClick={() => setAddServiceTarget(b.id)}
+                  className="w-full"
+                  variant="outline"
+                  size="sm"
+                >
+                  Tambah Layanan
+                </Button>
+                <Button onClick={() => setCompleteTarget(b.id)} className="w-full bg-success text-success-foreground hover:bg-success/90" size="sm">
+                  <CheckCircle className="w-4 h-4 mr-2" /> Selesai
+                </Button>
+                <AlertDialog open={completeTarget === b.id} onOpenChange={(open) => !open && setCompleteTarget(null)}>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Selesaikan booking?</AlertDialogTitle>
+                    </AlertDialogHeader>
+                    <div>Booking akan diselesaikan. Lanjutkan?</div>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Batal</AlertDialogCancel>
+                      <AlertDialogAction onClick={handleComplete}>Ya, selesai</AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </div>
+            )}
+
+            {b.status === "Selesai" && (
+              <div className="space-y-1">
+                <p className="text-sm text-muted-foreground">
+                  Dikerjakan oleh: <span className="font-medium text-foreground">{b.employeeName || "-"}</span>
+                </p>
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                      b.paymentStatus === "Paid" ? "bg-success/10 text-success" : "bg-warning/10 text-warning"
+                    }`}
+                  >
+                    {b.paymentStatus === "Paid" ? "Lunas" : "Belum bayar"}
+                  </span>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      ))}
+      {rows.length === 0 && (
+        <Card className="border-border/50">
+          <CardContent className="p-6 text-center text-muted-foreground">Belum ada data booking.</CardContent>
+        </Card>
+      )}
+    </div>
+  );
+
   return (
     <div>
       <PageHeader title="Booked" description="Kelola antrian booking yang masuk" />
@@ -136,6 +248,7 @@ export default function BookedList() {
           <Select value={status} onValueChange={setStatus}>
             <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
             <SelectContent>
+              <SelectItem value="Aktif">Aktif</SelectItem>
               <SelectItem value="Menunggu">Menunggu</SelectItem>
               <SelectItem value="Proses">Proses</SelectItem>
               <SelectItem value="Selesai">Selesai</SelectItem>
@@ -144,110 +257,34 @@ export default function BookedList() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-        {data.map((b) => (
-          <Card key={b.id} className={`border-border/50 ${b.status === "Selesai" ? "opacity-60" : ""}`}>
-            <CardContent className="p-5">
-              <div className="flex items-start justify-between mb-3">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-display text-2xl font-bold text-accent">#{b.antrian}</span>
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusVariant[b.status]}`}>
-                      {b.status}
-                    </span>
-                  </div>
-                  <p className="text-sm text-muted-foreground">{b.bookingCode}</p>
-                </div>
+      {status === "Aktif" ? (
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <Card className="border-border/50">
+            <CardContent className="p-4">
+              <div className="mb-3">
+                <div className="font-display font-semibold text-lg">Menunggu</div>
+                <div className="text-xs text-muted-foreground">Booking yang belum di-assign</div>
               </div>
-
-              <div className="space-y-2 mb-4">
-                <p className="text-sm"><span className="text-muted-foreground">Customer:</span> <span className="font-medium">{b.customerName}</span></p>
-                <div className="flex flex-wrap gap-1">
-                  {b.services.map((l) => (
-                    <Badge key={l.kode} variant="secondary" className="text-xs">{l.nama}</Badge>
-                  ))}
-                </div>
-              </div>
-
-              {b.status === "Menunggu" && (
-                <>
-                  <Select onValueChange={(v) => setAssignTarget({ id: b.id, pegawai: v })}>
-                    <SelectTrigger className="text-sm"><SelectValue placeholder="Assign pegawai..." /></SelectTrigger>
-                    <SelectContent>
-                      {employees.map((employee) => (
-                        <SelectItem key={employee.id} value={employee.nama}>{employee.nama}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <AlertDialog open={!!assignTarget && assignTarget?.id === b.id} onOpenChange={(open) => !open && setAssignTarget(null)}>
-                    <AlertDialogContent>
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>Proses booking?</AlertDialogTitle>
-                      </AlertDialogHeader>
-                      <div>Booking akan diproses oleh pegawai <b>{assignTarget?.pegawai}</b>. Lanjutkan?</div>
-                      <AlertDialogFooter>
-                        <AlertDialogCancel>Batal</AlertDialogCancel>
-                        <AlertDialogAction onClick={handleAssign}>Ya, proses</AlertDialogAction>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
-                </>
-              )}
-
-              {b.status === "Proses" && (
-                <div className="space-y-2">
-                  <p className="text-sm"><span className="text-muted-foreground">Pegawai:</span> <span className="font-medium">{b.employeeName}</span></p>
-                  <Button
-                    onClick={() => setAddServiceTarget(b.id)}
-                    className="w-full"
-                    variant="outline"
-                    size="sm"
-                  >
-                    Tambah Layanan
-                  </Button>
-                  <Button onClick={() => setCompleteTarget(b.id)} className="w-full bg-success text-success-foreground hover:bg-success/90" size="sm">
-                    <CheckCircle className="w-4 h-4 mr-2" /> Selesai
-                  </Button>
-                  <AlertDialog open={completeTarget === b.id} onOpenChange={(open) => !open && setCompleteTarget(null)}>
-                    <AlertDialogContent>
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>Selesaikan booking?</AlertDialogTitle>
-                      </AlertDialogHeader>
-                      <div>Booking akan diselesaikan. Lanjutkan?</div>
-                      <AlertDialogFooter>
-                        <AlertDialogCancel>Batal</AlertDialogCancel>
-                        <AlertDialogAction onClick={handleComplete}>Ya, selesai</AlertDialogAction>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
-                </div>
-              )}
-
-              {b.status === "Selesai" && (
-                <div className="space-y-1">
-                  <p className="text-sm text-muted-foreground">
-                    Dikerjakan oleh: <span className="font-medium text-foreground">{b.employeeName || "-"}</span>
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                        b.paymentStatus === "Paid" ? "bg-success/10 text-success" : "bg-warning/10 text-warning"
-                      }`}
-                    >
-                      {b.paymentStatus === "Paid" ? "Lunas" : "Belum bayar"}
-                    </span>
-                  </div>
-                </div>
-              )}
+              {renderCards(menungguRows)}
             </CardContent>
           </Card>
-        ))}
-        {data.length === 0 && (
           <Card className="border-border/50">
-            <CardContent className="p-6 text-center text-muted-foreground">Belum ada data booking.</CardContent>
+            <CardContent className="p-4">
+              <div className="mb-3">
+                <div className="font-display font-semibold text-lg">Proses</div>
+                <div className="text-xs text-muted-foreground">Booking yang sedang dikerjakan</div>
+              </div>
+              {renderCards(prosesRows)}
+            </CardContent>
           </Card>
-        )}
-      </div>
+        </div>
+      ) : status === "Menunggu" ? (
+        renderCards(menungguRows)
+      ) : status === "Proses" ? (
+        renderCards(prosesRows)
+      ) : (
+        renderCards(selesaiRows)
+      )}
 
       <Dialog open={!!addServiceTarget} onOpenChange={(open) => (!open ? setAddServiceTarget(null) : null)}>
         <DialogContent>
