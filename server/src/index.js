@@ -1390,6 +1390,9 @@ app.get(
         voidedAt: r.tgl_void,
         voidReason: r.alasan_void || "",
         voidedBy: r.dibatalkan_oleh || "",
+        customerName: r.nama_pelanggan || "",
+        customerPhone: r.no_hp_pelanggan || "",
+        items: r.item || [],
       })),
     );
   }),
@@ -2732,10 +2735,7 @@ app.post(
         if (customerId && isMember && pointsEarned > 0) {
           await Customer.updateOne(
             { _id: customerId },
-            {
-              $inc: { pointsBalance: pointsEarned, visitCount: 1 },
-              $set: { lastVisitAt: paidAt },
-            },
+            { $inc: { pointsBalance: pointsEarned, visitCount: 1 }, $set: { lastVisitAt: paidAt } },
             { session },
           );
         } else if (customerId) {
@@ -2874,7 +2874,7 @@ app.post(
             salePayload.nama_pelanggan
               ? `Customer: ${salePayload.nama_pelanggan}${waPhone ? ` (${waPhone})` : ""}`
               : null,
-            `Total: ${new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(salePayload.total)}`,
+            `Total: ${new Intl.DateTimeFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(salePayload.total)}`,
           ]
             .filter(Boolean)
             .join("\n");
@@ -3478,3 +3478,65 @@ bootstrap().catch((err) => {
   console.error("Failed to start server:", err);
   process.exit(1);
 });
+
+// ENDPOINT LOGIN
+app.post(
+  "/api/auth/login",
+  asyncHandler(async (req, res) => {
+    const { username, password } = req.body || {};
+    const user = await User.findOne({ username }).lean();
+    if (!user || !verifyPassword(password, user.password)) {
+      return res.status(401).json({ message: "Username atau password salah" });
+    }
+    const token = signJwtHs256({ id: user._id, username: user.username, level: user.level });
+    res.json({
+      user: {
+        id: String(user._id),
+        username: user.username,
+        level: user.level,
+        menuAccess: user.menuAccess || [],
+      },
+      token,
+    });
+  })
+);
+
+// --- PASSWORD HASHING & VERIFICATION ---
+const hashPassword = (password) => {
+  const salt = crypto.randomBytes(16);
+  const N = 16384;
+  const r = 8;
+  const p = 1;
+  const derivedKey = crypto.scryptSync(String(password), salt, 32, { N, r, p });
+  return `scrypt$N=${N}$r=${r}$p=${p}$${salt.toString("base64")}$${derivedKey.toString("base64")}`;
+};
+
+const verifyPassword = (password, storedHash) => {
+  const stored = String(storedHash || "");
+  const plain = String(password || "");
+  if (!stored || !plain) return false;
+
+  if (!stored.startsWith("scrypt$")) {
+    return Buffer.byteLength(stored) === Buffer.byteLength(plain) && crypto.timingSafeEqual(Buffer.from(stored), Buffer.from(plain));
+  }
+
+  const parts = stored.split("$");
+  // Format: scrypt$N=...$r=...$p=...$<saltB64>$<keyB64>
+  if (parts.length < 6) return false;
+  const N = Number(String(parts[1] || "").split("=")[1] || 0);
+  const r = Number(String(parts[2] || "").split("=")[1] || 0);
+  const p = Number(String(parts[3] || "").split("=")[1] || 0);
+  if (!Number.isFinite(N) || !Number.isFinite(r) || !Number.isFinite(p) || N <= 0 || r <= 0 || p <= 0) return false;
+  let salt;
+  let expected;
+  try {
+    salt = Buffer.from(parts[4], "base64");
+    expected = Buffer.from(parts[5], "base64");
+  } catch {
+    return false;
+  }
+  if (!salt.length || !expected.length) return false;
+  const derived = crypto.scryptSync(plain, salt, expected.length, { N, r, p });
+  return Buffer.byteLength(derived) === Buffer.byteLength(expected) && crypto.timingSafeEqual(derived, expected);
+};
+// --- END PASSWORD HASHING ---
