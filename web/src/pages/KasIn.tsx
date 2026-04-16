@@ -31,7 +31,8 @@ export default function KasIn() {
         toast({ title: "Error", description: "Deskripsi wajib diisi", variant: "destructive" });
         return;
       }
-      await api.cashIn(amountNum, description.trim());
+      const descUpper = description.trim().toUpperCase();
+      await api.cashIn(amountNum, descUpper);
       toast({ title: "Berhasil", description: "Uang kas berhasil ditambahkan" });
       setAmount("");
       setDescription("");
@@ -64,7 +65,7 @@ export default function KasIn() {
           </div>
           <div className="space-y-1">
             <label className="text-xs text-muted-foreground">Deskripsi</label>
-            <Input value={description} autoUppercase={false} onChange={(e) => setDescription(e.target.value)} placeholder="Contoh: Modal kas awal" />
+            <Input value={description} autoUppercase={false} onChange={(e) => setDescription(e.target.value.toUpperCase())} placeholder="Contoh: Modal kas awal" />
           </div>
 
           <Button onClick={submit} disabled={loading} className="w-full bg-accent text-accent-foreground hover:bg-accent/90">

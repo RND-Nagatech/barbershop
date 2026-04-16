@@ -61,8 +61,8 @@ const menuGroups = [
     icon: PackageSearch,
     items: [
       { title: "Master Pegawai", url: "/master/pegawai", icon: Users },
-      { title: "Master Layanan", url: "/master/layanan", icon: Scissors },
       { title: "Master Produk", url: "/master/produk", icon: ShoppingBag },
+      { title: "Master Layanan", url: "/master/layanan", icon: Scissors },
       { title: "Customer / Member", url: "/customer", icon: ContactRound },
     ],
   },

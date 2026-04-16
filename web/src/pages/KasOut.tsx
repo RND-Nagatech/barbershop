@@ -31,7 +31,8 @@ export default function KasOut() {
         toast({ title: "Error", description: "Deskripsi wajib diisi", variant: "destructive" });
         return;
       }
-      await api.cashOut(amountNum, description.trim());
+      const descUpper = description.trim().toUpperCase();
+      await api.cashOut(amountNum, descUpper);
       toast({ title: "Berhasil", description: "Pengambilan uang kas berhasil disimpan" });
       setAmount("");
       setDescription("");
@@ -64,7 +65,7 @@ export default function KasOut() {
           </div>
           <div className="space-y-1">
             <label className="text-xs text-muted-foreground">Deskripsi</label>
-            <Input value={description} autoUppercase={false} onChange={(e) => setDescription(e.target.value)} placeholder="Contoh: Bayar listrik" />
+            <Input value={description} autoUppercase={false} onChange={(e) => setDescription(e.target.value.toUpperCase())} placeholder="Contoh: Bayar listrik" />
           </div>
 
           <Button onClick={submit} disabled={loading} className="w-full bg-accent text-accent-foreground hover:bg-accent/90">

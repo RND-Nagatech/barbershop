@@ -261,7 +261,7 @@ export default function KasirPembayaran() {
       }
       const paid = await api.createDirectSale({
         customerType: directCustomerType,
-        customerName: directCustomerName.trim() || undefined,
+        customerName: directCustomerName.trim().toUpperCase() || undefined,
         customerPhone: directCustomerPhone.trim() || undefined,
         items: directItems.map((it) => ({ kode: it.kode, qty: it.qty, isCompliment: Boolean(it.isCompliment) })),
         received: nominal,
@@ -566,8 +566,7 @@ export default function KasirPembayaran() {
               </div>
               <div className="space-y-1">
                 <label className="text-muted-foreground text-xs">Nama (opsional)</label>
-                <Input value={directCustomerName} autoUppercase={false} onChange={(e) => setDirectCustomerName(e.target.value)} placeholder="Nama customer" />
-              </div>
+                <Input value={directCustomerName} autoUppercase={false} onChange={(e) => setDirectCustomerName(e.target.value.toUpperCase())} placeholder="Nama customer" />              </div>
               <div className="space-y-1 sm:col-span-2">
                 <label className="text-muted-foreground text-xs">No HP/WA {directCustomerType === "member" ? "(wajib)" : "(opsional)"}</label>
                 <Input value={directCustomerPhone} autoUppercase={false} onChange={(e) => setDirectCustomerPhone(e.target.value)} placeholder="08xxxxxxxxxx" />
