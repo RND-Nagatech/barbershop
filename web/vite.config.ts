@@ -16,7 +16,7 @@ export default defineConfig(({ mode }) => ({
     fs: { allow: ["."] },
     historyApiFallback: true,
     proxy: {
-      '/api': 'http://192.168.110.190:3001',
+      '/api': 'http://192.168.43.145:3001',
     },
   },
   plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),

@@ -3,29 +3,28 @@ import { PageHeader } from "@/components/PageHeader";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { FileSpreadsheet, FileText } from "lucide-react";
-import { DateRangeFilter } from "@/components/DateRangeFilter";
 import { exportToExcel, exportToPDF } from "@/lib/exportUtils";
 import { api, type EmployeeReportRow } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
 import { formatLocalYmd } from "@/lib/date";
+import { Input } from "@/components/ui/input";
 
 const formatRp = (n: number) =>
   new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(n);
 
 export default function LaporanPegawai() {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const getToday = () => formatLocalYmd(new Date()) ?? "";
   const [data, setData] = useState<EmployeeReportRow[]>([]);
-  const [from, setFrom] = useState<Date | undefined>(today);
-  const [to, setTo] = useState<Date | undefined>(new Date(today));
+  const [from, setFrom] = useState(getToday());
+  const [to, setTo] = useState(getToday());
 
   useEffect(() => {
     const load = async () => {
       try {
         setData(
           await api.getEmployeeReport({
-            from: formatLocalYmd(from),
-            to: formatLocalYmd(to),
+            from,
+            to,
           }),
         );
       } catch (error) {
@@ -58,7 +57,16 @@ export default function LaporanPegawai() {
       </PageHeader>
 
       <div className="mb-4">
-        <DateRangeFilter from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
+        <div className="flex flex-wrap gap-2 items-end">
+          <div>
+            <label className="block text-xs mb-1">Dari</label>
+            <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="w-36" autoUppercase={false} />
+          </div>
+          <div>
+            <label className="block text-xs mb-1">Sampai</label>
+            <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="w-36" autoUppercase={false} />
+          </div>
+        </div>
       </div>
 
       <Card className="border-border/50">

@@ -1,29 +1,35 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { DateRangeFilter } from "@/components/DateRangeFilter";
 import { toast } from "@/hooks/use-toast";
-import { api, type StockMovementItem } from "@/lib/api";
+import { api, type Product, type StockMovementItem } from "@/lib/api";
 import { formatLocalYmd } from "@/lib/date";
+import { Button } from "@/components/ui/button";
+import { FileSpreadsheet, FileText } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { exportToExcel, exportToPDF } from "@/lib/exportUtils";
+import { Input } from "@/components/ui/input";
 
 export default function MutasiStok() {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const [from, setFrom] = useState<Date | undefined>(today);
-  const [to, setTo] = useState<Date | undefined>(new Date(today));
-  const [kode, setKode] = useState("");
+  const getToday = () => formatLocalYmd(new Date()) || "";
+  const [from, setFrom] = useState<string>(getToday());
+  const [to, setTo] = useState<string>(getToday());
+  const [kode, setKode] = useState<string>("all");
+  const [products, setProducts] = useState<Product[]>([]);
   const [data, setData] = useState<StockMovementItem[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const selectedKode = kode !== "all" ? kode : "";
 
   const load = async () => {
     setLoading(true);
     try {
+      if (products.length === 0) setProducts(await api.getProducts());
       setData(
         await api.getStockMovements({
-          from: formatLocalYmd(from),
-          to: formatLocalYmd(to),
-          kode: kode.trim() || undefined,
+          from: from.trim() || undefined,
+          to: to.trim() || undefined,
+          kode: selectedKode.trim() || undefined,
         }),
       );
     } catch (error) {
@@ -42,28 +48,62 @@ export default function MutasiStok() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [from, to]);
 
+  const exportHeaders = ["Tanggal", "Kode", "Nama", "Delta", "Reason", "Ref"];
+  const exportRows = useMemo(
+    () =>
+      data.map((m) => [
+        m.ymd,
+        m.kode,
+        m.nama,
+        m.delta,
+        m.reason,
+        m.refBookingCode || "-",
+      ]),
+    [data],
+  );
+
+  const handleExcel = () => exportToExcel("Mutasi Stok", exportHeaders, exportRows, "mutasi_stok");
+  const handlePDF = () => exportToPDF("Mutasi Stok", exportHeaders, exportRows, "mutasi_stok");
+
   return (
     <div>
-      <PageHeader title="Mutasi Stok" description="Riwayat perubahan stok produk" />
+      <PageHeader title="Mutasi Stok" description="Riwayat perubahan stok produk">
+        <Button variant="outline" size="sm" onClick={handleExcel}>
+          <FileSpreadsheet className="w-4 h-4 mr-2" /> Excel
+        </Button>
+        <Button variant="outline" size="sm" onClick={handlePDF}>
+          <FileText className="w-4 h-4 mr-2" /> PDF
+        </Button>
+      </PageHeader>
 
-      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <DateRangeFilter from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
-        <div className="flex items-center gap-2">
-          <Input
-            value={kode}
-            autoUppercase={false}
-            onChange={(e) => setKode(e.target.value)}
-            placeholder="Filter kode produk (opsional)"
-            className="w-[220px]"
-          />
-          <button
-            className="h-10 rounded-md border border-input px-3 text-sm hover:bg-muted"
-            type="button"
-            onClick={load}
-          >
-            Terapkan
-          </button>
+      <div className="flex flex-wrap gap-2 mb-4 items-end">
+        <div>
+          <label className="block text-xs mb-1">Dari</label>
+          <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="w-36" autoUppercase={false} />
         </div>
+        <div>
+          <label className="block text-xs mb-1">Sampai</label>
+          <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="w-36" autoUppercase={false} />
+        </div>
+        <div>
+          <label className="block text-xs mb-1">Kode Produk</label>
+          <Select value={kode} onValueChange={setKode}>
+            <SelectTrigger className="w-[320px]">
+              <SelectValue placeholder="Semua" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Semua</SelectItem>
+              {products.map((p) => (
+                <SelectItem key={p.id} value={p.kode}>
+                  {p.kode} - {p.nama}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <Button variant="outline" onClick={load}>
+          Terapkan
+        </Button>
       </div>
 
       <Card className="border-border/50">
@@ -116,4 +156,3 @@ export default function MutasiStok() {
     </div>
   );
 }
-

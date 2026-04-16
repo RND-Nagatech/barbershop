@@ -4,6 +4,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/hooks/use-toast";
 import { api, type Product } from "@/lib/api";
+import { Button } from "@/components/ui/button";
+import { FileSpreadsheet, FileText } from "lucide-react";
+import { exportToExcel, exportToPDF } from "@/lib/exportUtils";
 
 const formatRp = (n: number) =>
   new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(n);
@@ -37,13 +40,43 @@ export default function LaporanStok() {
   return (
     <div>
       <PageHeader title="Laporan Stok" description="Ringkasan stok produk saat ini">
-        <Input
-          value={query}
-          autoUppercase={false}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Cari produk..."
-          className="w-[260px]"
-        />
+        <div className="flex items-center gap-2">
+          <Input
+            value={query}
+            autoUppercase={false}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Cari produk..."
+            className="w-[260px]"
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              const headers = ["Kode", "Nama Produk", "Harga", "Stok", "Min", "Status"];
+              const rows = filtered.map((p) => {
+                const low = (p.minStok ?? 0) > 0 && p.stok <= p.minStok;
+                return [p.kode, p.nama, formatRp(p.harga), p.stok, p.minStok, low ? "Low Stock" : "OK"];
+              });
+              exportToExcel("Laporan Stok", headers, rows, "laporan_stok");
+            }}
+          >
+            <FileSpreadsheet className="w-4 h-4 mr-2" /> Excel
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              const headers = ["Kode", "Nama Produk", "Harga", "Stok", "Min", "Status"];
+              const rows = filtered.map((p) => {
+                const low = (p.minStok ?? 0) > 0 && p.stok <= p.minStok;
+                return [p.kode, p.nama, formatRp(p.harga), p.stok, p.minStok, low ? "Low Stock" : "OK"];
+              });
+              exportToPDF("Laporan Stok", headers, rows, "laporan_stok");
+            }}
+          >
+            <FileText className="w-4 h-4 mr-2" /> PDF
+          </Button>
+        </div>
       </PageHeader>
 
       <Card className="border-border/50">
@@ -93,4 +126,3 @@ export default function LaporanStok() {
     </div>
   );
 }
-

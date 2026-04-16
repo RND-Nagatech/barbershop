@@ -82,7 +82,7 @@ export default function PublicBooking() {
           customerName: String(r.customerName || ""),
           phone: String(r.phone || ""),
           employeeName: "",
-          services: (r.services as any) || [],
+          services: Array.isArray(r.services) ? (r.services as unknown as BookingItem["services"]) : [],
           products: [],
           status: "Menunggu" as const,
           createdAt: String(r.createdAt || new Date().toISOString()),

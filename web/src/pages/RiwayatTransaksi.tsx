@@ -3,7 +3,6 @@ import { PageHeader } from "@/components/PageHeader";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { DateRangeFilter } from "@/components/DateRangeFilter";
 import {
   Dialog,
   DialogContent,
@@ -21,10 +20,9 @@ const formatRp = (n: number) =>
   new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(n);
 
 export default function RiwayatTransaksi() {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const [from, setFrom] = useState<Date | undefined>(today);
-  const [to, setTo] = useState<Date | undefined>(new Date(today));
+  const getToday = () => formatLocalYmd(new Date()) ?? "";
+  const [from, setFrom] = useState(getToday());
+  const [to, setTo] = useState(getToday());
   const [query, setQuery] = useState("");
   const [includeVoid, setIncludeVoid] = useState(false);
   const [data, setData] = useState<SaleListItem[]>([]);
@@ -39,8 +37,8 @@ export default function RiwayatTransaksi() {
     setLoading(true);
     try {
       const rows = await api.getSales({
-        from: formatLocalYmd(from),
-        to: formatLocalYmd(to),
+        from,
+        to,
         q: query.trim() || undefined,
         includeVoid,
       });
@@ -59,7 +57,7 @@ export default function RiwayatTransaksi() {
   useEffect(() => {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [from, to]);
+  }, [from, to, includeVoid]);
 
   const openDetail = async (id: string) => {
     try {
@@ -78,7 +76,7 @@ export default function RiwayatTransaksi() {
   const receiptData: ReceiptData | null = useMemo(() => {
     if (!detail) return null;
     return {
-      bookingCode: detail.bookingCode,
+      bookingCode: detail.saleCode || detail.bookingCode,
       paidAt: detail.paidAt,
       items: detail.items,
       total: detail.total,
@@ -95,7 +93,7 @@ export default function RiwayatTransaksi() {
             value={query}
             autoUppercase={false}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Cari: no booking / barber..."
+            placeholder="Cari: kode transaksi/booking, customer, no HP, barber..."
             className="w-[260px]"
           />
           <Button variant="outline" onClick={load}>
@@ -105,7 +103,16 @@ export default function RiwayatTransaksi() {
       </PageHeader>
 
       <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <DateRangeFilter from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
+        <div className="flex flex-wrap gap-2 items-end">
+          <div>
+            <label className="block text-xs mb-1">Dari</label>
+            <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="w-36" autoUppercase={false} />
+          </div>
+          <div>
+            <label className="block text-xs mb-1">Sampai</label>
+            <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="w-36" autoUppercase={false} />
+          </div>
+        </div>
         <label className="flex items-center gap-2 text-sm text-muted-foreground">
           <Checkbox checked={includeVoid} onCheckedChange={(v) => setIncludeVoid(Boolean(v))} />
           Tampilkan yang di-void
@@ -135,7 +142,7 @@ export default function RiwayatTransaksi() {
                 ) : (
                   data.map((s) => (
                     <tr key={s.id} className={`border-b last:border-0 ${s.status === "Void" ? "opacity-60" : ""}`}>
-                      <td className="py-3 font-medium">{s.bookingCode}</td>
+                      <td className="py-3 font-medium">{s.saleCode || s.bookingCode}</td>
                       <td className="py-3">{s.employeeName || "-"}</td>
                       <td className="py-3">{new Date(s.paidAt).toLocaleString("id-ID")}</td>
                       <td className="py-3 text-right">{formatRp(s.total)}</td>
@@ -163,7 +170,7 @@ export default function RiwayatTransaksi() {
       <Dialog open={!!detail} onOpenChange={(open) => (!open ? setDetail(null) : null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle className="font-display">Struk {detail?.bookingCode}</DialogTitle>
+            <DialogTitle className="font-display">Struk {detail?.saleCode || detail?.bookingCode}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3 text-sm">
             <div className="text-muted-foreground text-xs">{detail ? new Date(detail.paidAt).toLocaleString("id-ID") : ""}</div>
@@ -247,7 +254,7 @@ export default function RiwayatTransaksi() {
       <AlertDialog open={voidOpen} onOpenChange={setVoidOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Void transaksi {detail?.bookingCode}?</AlertDialogTitle>
+            <AlertDialogTitle>Void transaksi {detail?.saleCode || detail?.bookingCode}?</AlertDialogTitle>
           </AlertDialogHeader>
           <div className="space-y-2">
             <div className="text-sm text-muted-foreground">Stok produk (jika ada) akan dikembalikan, dan booking jadi bisa dibayar ulang.</div>

@@ -20,7 +20,7 @@ export function generateReceiptPdf(receipt: ReceiptData) {
   doc.setFontSize(14);
   doc.text("STRUK PEMBAYARAN", 14, 16);
   doc.setFontSize(10);
-  doc.text(`No Booking: ${receipt.bookingCode}`, 14, 24);
+  doc.text(`Kode Transaksi: ${receipt.bookingCode}`, 14, 24);
   doc.text(`Tanggal: ${new Date(receipt.paidAt).toLocaleString("id-ID")}`, 14, 29);
   if (receipt.customerName || receipt.customerPhone) {
     doc.text(`Customer: ${receipt.customerName || "-"} ${receipt.customerPhone ? `(${receipt.customerPhone})` : ""}`.trim(), 14, 34);
@@ -47,7 +47,7 @@ export function generateReceiptPdf(receipt: ReceiptData) {
     },
   });
 
-  const lastY = (doc as any).lastAutoTable?.finalY || 36;
+  const lastY = ((doc as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY ?? 36) as number;
   doc.setFontSize(10);
   doc.text(`Total: ${formatRp(receipt.total)}`, 14, lastY + 10);
   doc.text(`Dibayar: ${formatRp(receipt.received)}`, 14, lastY + 16);
@@ -88,7 +88,7 @@ export function openReceiptPrintWindow(receipt: ReceiptData) {
       <div class="wrap">
         <h1>STRUK PEMBAYARAN</h1>
         <div class="meta">
-          <div>No Booking: <b>${escapeHtml(receipt.bookingCode)}</b></div>
+          <div>Kode Transaksi: <b>${escapeHtml(receipt.bookingCode)}</b></div>
           <div>${escapeHtml(new Date(receipt.paidAt).toLocaleString("id-ID"))}</div>
           ${
             receipt.customerName || receipt.customerPhone

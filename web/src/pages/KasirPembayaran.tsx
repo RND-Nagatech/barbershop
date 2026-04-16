@@ -3,7 +3,6 @@ import { PageHeader } from "@/components/PageHeader";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { DateRangeFilter } from "@/components/DateRangeFilter";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -45,10 +44,9 @@ function sumGrandTotal(booking: BookingItem) {
 }
 
 export default function KasirPembayaran() {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const [from, setFrom] = useState<Date | undefined>(today);
-  const [to, setTo] = useState<Date | undefined>(new Date(today));
+  const getToday = () => formatLocalYmd(new Date()) ?? "";
+  const [from, setFrom] = useState(getToday());
+  const [to, setTo] = useState(getToday());
   const [data, setData] = useState<BookingItem[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
@@ -59,6 +57,16 @@ export default function KasirPembayaran() {
   const [selectedProduct, setSelectedProduct] = useState("");
   const [productQty, setProductQty] = useState("1");
   const [productIsCompliment, setProductIsCompliment] = useState(false);
+
+  const [directOpen, setDirectOpen] = useState(false);
+  const [directCustomerType, setDirectCustomerType] = useState<"member" | "regular">("regular");
+  const [directCustomerName, setDirectCustomerName] = useState("");
+  const [directCustomerPhone, setDirectCustomerPhone] = useState("");
+  const [directSelectedProduct, setDirectSelectedProduct] = useState("");
+  const [directQty, setDirectQty] = useState("1");
+  const [directIsCompliment, setDirectIsCompliment] = useState(false);
+  const [directItems, setDirectItems] = useState<Array<{ kode: string; nama: string; harga: number; qty: number; isCompliment?: boolean }>>([]);
+  const [directReceived, setDirectReceived] = useState("");
   const [receipt, setReceipt] = useState<{
     bookingCode: string;
     paidAt: string;
@@ -75,8 +83,8 @@ export default function KasirPembayaran() {
     setLoading(true);
     try {
       const rows = await api.getBookings({
-        from: formatLocalYmd(from),
-        to: formatLocalYmd(to),
+        from,
+        to,
         status: "Selesai",
         paymentStatus: "Unpaid",
       });
@@ -194,20 +202,120 @@ export default function KasirPembayaran() {
     }
   };
 
+  const directTotal = useMemo(
+    () => directItems.reduce((sum, it) => sum + (Number(it.harga) || 0) * (Number(it.qty) || 0), 0),
+    [directItems],
+  );
+  const directReceivedNum = Number(directReceived || 0);
+  const directChange = directReceivedNum - directTotal;
+
+  const openDirect = () => {
+    setDirectOpen(true);
+    setDirectCustomerType("regular");
+    setDirectCustomerName("");
+    setDirectCustomerPhone("");
+    setDirectSelectedProduct("");
+    setDirectQty("1");
+    setDirectIsCompliment(false);
+    setDirectItems([]);
+    setDirectReceived("");
+  };
+
+  const addDirectItem = () => {
+    if (!directSelectedProduct) return;
+    const qty = Number(directQty);
+    if (!Number.isFinite(qty) || qty <= 0) {
+      toast({ title: "Error", description: "Qty tidak valid", variant: "destructive" });
+      return;
+    }
+    const p = products.find((x) => x.kode === directSelectedProduct);
+    if (!p) {
+      toast({ title: "Error", description: "Produk tidak ditemukan", variant: "destructive" });
+      return;
+    }
+    setDirectItems((prev) => [
+      ...prev,
+      { kode: p.kode, nama: p.nama, harga: directIsCompliment ? 0 : p.harga, qty, isCompliment: directIsCompliment },
+    ]);
+    setDirectSelectedProduct("");
+    setDirectQty("1");
+    setDirectIsCompliment(false);
+  };
+
+  const removeDirectItem = (idx: number) => setDirectItems((prev) => prev.filter((_, i) => i !== idx));
+
+  const submitDirectSale = async () => {
+    try {
+      const nominal = Number(directReceived);
+      if (!Number.isFinite(nominal) || nominal < 0) {
+        toast({ title: "Error", description: "Nominal uang diterima tidak valid", variant: "destructive" });
+        return;
+      }
+      if (directItems.length === 0) {
+        toast({ title: "Error", description: "Item transaksi wajib diisi", variant: "destructive" });
+        return;
+      }
+      if (directCustomerType === "member" && !directCustomerPhone.trim()) {
+        toast({ title: "Error", description: "No HP member wajib diisi", variant: "destructive" });
+        return;
+      }
+      const paid = await api.createDirectSale({
+        customerType: directCustomerType,
+        customerName: directCustomerName.trim() || undefined,
+        customerPhone: directCustomerPhone.trim() || undefined,
+        items: directItems.map((it) => ({ kode: it.kode, qty: it.qty, isCompliment: Boolean(it.isCompliment) })),
+        received: nominal,
+      });
+      setReceipt({
+        bookingCode: paid.saleCode || paid.bookingCode,
+        paidAt: paid.paidAt,
+        items: paid.items || [],
+        total: paid.total,
+        received: paid.received,
+        change: paid.change,
+        customerName: paid.customerName || "",
+        customerPhone: paid.customerPhone || "",
+      });
+      toast({ title: "Berhasil", description: `Transaksi ${paid.saleCode || paid.bookingCode} berhasil` });
+      setDirectOpen(false);
+      setEmail("");
+    } catch (error) {
+      toast({
+        title: "Gagal membuat transaksi",
+        description: error instanceof Error ? error.message : "Terjadi kesalahan",
+        variant: "destructive",
+      });
+    }
+  };
+
   return (
     <div>
       <PageHeader title="Kasir / Pembayaran" description="Selesaikan pembayaran booking yang sudah dikerjakan">
-        <Input
-          value={query}
-          autoUppercase={false}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Cari: kode booking, nama, no HP, barber..."
-          className="w-[280px]"
-        />
+        <div className="flex items-center gap-2">
+          <Button className="bg-accent text-accent-foreground hover:bg-accent/90" onClick={openDirect}>
+            Add Transaksi
+          </Button>
+          <Input
+            value={query}
+            autoUppercase={false}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Cari: kode booking, nama, no HP, barber..."
+            className="w-[280px]"
+          />
+        </div>
       </PageHeader>
 
       <div className="mb-4">
-        <DateRangeFilter from={from} to={to} onFromChange={setFrom} onToChange={setTo} />
+        <div className="flex flex-wrap gap-2 items-end">
+          <div>
+            <label className="block text-xs mb-1">Dari</label>
+            <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="w-36" autoUppercase={false} />
+          </div>
+          <div>
+            <label className="block text-xs mb-1">Sampai</label>
+            <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="w-36" autoUppercase={false} />
+          </div>
+        </div>
       </div>
 
       {loading ? (
@@ -433,6 +541,137 @@ export default function KasirPembayaran() {
               className="bg-accent text-accent-foreground hover:bg-accent/90"
             >
               PDF
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={directOpen} onOpenChange={setDirectOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Transaksi Baru</AlertDialogTitle>
+          </AlertDialogHeader>
+          <div className="space-y-3 text-sm">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label className="text-muted-foreground text-xs">Tipe Customer</label>
+                <div className="flex gap-2">
+                  <Button type="button" variant={directCustomerType === "regular" ? "default" : "outline"} className={directCustomerType === "regular" ? "bg-accent text-accent-foreground hover:bg-accent/90" : ""} onClick={() => setDirectCustomerType("regular")}>
+                    Reguler
+                  </Button>
+                  <Button type="button" variant={directCustomerType === "member" ? "default" : "outline"} className={directCustomerType === "member" ? "bg-accent text-accent-foreground hover:bg-accent/90" : ""} onClick={() => setDirectCustomerType("member")}>
+                    Member
+                  </Button>
+                </div>
+              </div>
+              <div className="space-y-1">
+                <label className="text-muted-foreground text-xs">Nama (opsional)</label>
+                <Input value={directCustomerName} autoUppercase={false} onChange={(e) => setDirectCustomerName(e.target.value)} placeholder="Nama customer" />
+              </div>
+              <div className="space-y-1 sm:col-span-2">
+                <label className="text-muted-foreground text-xs">No HP/WA {directCustomerType === "member" ? "(wajib)" : "(opsional)"}</label>
+                <Input value={directCustomerPhone} autoUppercase={false} onChange={(e) => setDirectCustomerPhone(e.target.value)} placeholder="08xxxxxxxxxx" />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-xs text-muted-foreground">Tambah Produk</p>
+              <div className="flex gap-2">
+                <select
+                  className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={directSelectedProduct}
+                  onChange={(e) => setDirectSelectedProduct(e.target.value)}
+                >
+                  <option value="">Pilih produk...</option>
+                  {products.map((p) => (
+                    <option key={p.id} value={p.kode}>
+                      {p.nama} ({p.kode}) - stok {p.stok}
+                    </option>
+                  ))}
+                </select>
+                <Input
+                  className="w-24"
+                  value={directQty}
+                  autoUppercase={false}
+                  inputMode="numeric"
+                  onChange={(e) => setDirectQty(sanitizeRupiahInput(e.target.value))}
+                  placeholder="Qty"
+                />
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <input type="checkbox" checked={directIsCompliment} onChange={(e) => setDirectIsCompliment(e.target.checked)} />
+                  Compliment (harga 0)
+                </label>
+                <Button type="button" variant="outline" onClick={addDirectItem} disabled={!directSelectedProduct}>
+                  Tambah
+                </Button>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-xs text-muted-foreground">Item</p>
+              <div className="max-h-40 overflow-auto rounded-md border border-border/50">
+                {directItems.length === 0 ? (
+                  <div className="p-3 text-xs text-muted-foreground">Belum ada item.</div>
+                ) : (
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b text-muted-foreground">
+                        <th className="p-2 text-left">Nama</th>
+                        <th className="p-2 text-right">Qty</th>
+                        <th className="p-2 text-right">Subtotal</th>
+                        <th className="p-2 text-right">Aksi</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {directItems.map((it, idx) => (
+                        <tr key={`${it.kode}:${idx}`} className="border-b last:border-0">
+                          <td className="p-2">
+                            <span className="font-medium">{it.nama}</span>{" "}
+                            {it.isCompliment ? <span className="text-[10px] text-muted-foreground">(Compliment)</span> : null}
+                          </td>
+                          <td className="p-2 text-right tabular-nums">{it.qty}</td>
+                          <td className="p-2 text-right tabular-nums">{formatRp((Number(it.harga) || 0) * (Number(it.qty) || 0))}</td>
+                          <td className="p-2 text-right">
+                            <button className="text-xs text-destructive" type="button" onClick={() => removeDirectItem(idx)}>
+                              Hapus
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Total</span>
+              <span className="font-medium">{formatRp(directTotal)}</span>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-muted-foreground text-xs">Uang diterima</label>
+              <Input
+                value={formatRupiahInput(directReceived)}
+                autoUppercase={false}
+                inputMode="numeric"
+                onChange={(e) => setDirectReceived(sanitizeRupiahInput(e.target.value))}
+                placeholder="0"
+              />
+            </div>
+
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Kembalian</span>
+              <span className={`font-medium ${directChange < 0 ? "text-destructive" : ""}`}>{formatRp(Math.max(0, directChange))}</span>
+            </div>
+            {directChange < 0 && <p className="text-xs text-destructive">Uang diterima kurang dari total.</p>}
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Batal</AlertDialogCancel>
+            <AlertDialogAction onClick={submitDirectSale} disabled={directChange < 0}>
+              Simpan
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

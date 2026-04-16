@@ -19,6 +19,9 @@ import {
   UserCog,
   Shield,
   Settings,
+  Wallet,
+  ArrowDownCircle,
+  ArrowUpCircle,
   LogOut,
   ChevronDown,
   MessageCircle,
@@ -74,6 +77,14 @@ const menuGroups = [
     ],
   },
   {
+    label: "Kas",
+    icon: Wallet,
+    items: [
+      { title: "Tambah Uang Kas", url: "/kas/in", icon: ArrowDownCircle },
+      { title: "Ambil Uang Kas", url: "/kas/out", icon: ArrowUpCircle },
+    ],
+  },
+  {
     label: "Laporan",
     icon: BarChart3,
     items: [
@@ -97,12 +108,17 @@ const menuGroups = [
     icon: Settings2,
     items: [
       { title: "Setting Komisi", url: "/setting/komisi", icon: Settings },
-      { title: "Setting Loyalty", url: "/setting/loyalty", icon: Settings },
+      { title: "Setting Poin", url: "/setting/loyalty", icon: Settings },
       { title: "Data Cabang", url: "/setting/cabang", icon: Settings },
       { title: "WhatsApp Gateway", url: "/setting/whatsapp", icon: MessageCircle },
     ],
   },
 ];
+
+const legacyMenuAliases: Record<string, string[]> = {
+  "Customer / Member": ["Member"],
+  "Setting Poin": ["Setting Loyalty"],
+};
 
 function getAllowedTitles() {
   const user = getAuthUser();
@@ -151,7 +167,12 @@ export function AppSidebar() {
         {menuGroups
           .map((group) => {
             const allowedItems = allowedTitles
-              ? group.items.filter((i) => allowedTitles.has(i.title) || i.url === "/dashboard")
+              ? group.items.filter((i) => {
+                  if (i.url === "/dashboard") return true;
+                  if (allowedTitles.has(i.title)) return true;
+                  const aliases = legacyMenuAliases[i.title] || [];
+                  return aliases.some((a) => allowedTitles.has(a));
+                })
               : group.items;
             return { ...group, items: allowedItems };
           })

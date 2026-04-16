@@ -20,6 +20,13 @@ export function AppLayout() {
 
     const allowed = new Set(user.menuAccess || []);
     const path = location.pathname;
+    const legacyAllowed = (title: string) => {
+      if (allowed.has(title)) return true;
+      if (title === "Customer / Member" && allowed.has("Member")) return true;
+      if (title === "Member" && allowed.has("Customer / Member")) return true;
+      if (title === "Setting Poin" && allowed.has("Setting Loyalty")) return true;
+      return false;
+    };
 
     const routeToMenuTitle: Array<[RegExp, string]> = [
       [/^\/dashboard$/, "Dashboard"],
@@ -30,6 +37,8 @@ export function AppLayout() {
       [/^\/booking\/input/, "Input Booking"],
       [/^\/booking\/list/, "Booked"],
       [/^\/kasir\/pembayaran/, "Kasir / Pembayaran"],
+      [/^\/kas\/in/, "Tambah Uang Kas"],
+      [/^\/kas\/out/, "Ambil Uang Kas"],
       [/^\/transaksi\/riwayat/, "Riwayat Transaksi"],
       [/^\/laporan\/transaksi/, "Laporan Transaksi"],
       [/^\/laporan\/keuangan/, "Laporan Keuangan"],
@@ -39,7 +48,7 @@ export function AppLayout() {
       [/^\/user\/data/, "Data User"],
       [/^\/user\/akses/, "Hak Akses User"],
       [/^\/setting\/komisi/, "Setting Komisi"],
-      [/^\/setting\/loyalty/, "Setting Loyalty"],
+      [/^\/setting\/loyalty/, "Setting Poin"],
       [/^\/setting\/whatsapp/, "WhatsApp Gateway"],
     ];
 
@@ -47,7 +56,7 @@ export function AppLayout() {
     if (!match) return;
     const title = match[1];
     if (title === "Dashboard") return;
-    if (!allowed.has(title)) navigate("/dashboard", { replace: true });
+    if (!legacyAllowed(title)) navigate("/dashboard", { replace: true });
   }, [location.pathname, navigate]);
 
   return (

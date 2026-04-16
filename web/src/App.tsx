@@ -30,6 +30,8 @@ import TvQueue from "./pages/TvQueue";
 import PublicTicketPage from "./pages/PublicTicket";
 import PublicReceiptPage from "./pages/PublicReceipt";
 import WhatsAppGateway from "./pages/WhatsAppGateway";
+import KasIn from "./pages/KasIn";
+import KasOut from "./pages/KasOut";
 
 const queryClient = new QueryClient();
 
@@ -59,6 +61,8 @@ const App = () => (
             <Route path="/laporan/stok" element={<LaporanStok />} />
             <Route path="/laporan/mutasi-stok" element={<MutasiStok />} />
             <Route path="/kasir/pembayaran" element={<KasirPembayaran />} />
+            <Route path="/kas/in" element={<KasIn />} />
+            <Route path="/kas/out" element={<KasOut />} />
             <Route path="/customer" element={<CustomerMember />} />
             <Route path="/user/data" element={<DataUser />} />
             <Route path="/user/akses" element={<HakAkses />} />

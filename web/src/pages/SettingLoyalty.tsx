@@ -9,10 +9,12 @@ import { toast } from "@/hooks/use-toast";
 import { api } from "@/lib/api";
 
 export default function SettingLoyalty() {
-  const [tipe, setTipe] = useState<"persentase" | "rupiah">("persentase");
-  const [nilai, setNilai] = useState("1");
+  const [mode, setMode] = useState<"per_transaction" | "per_rupiah">("per_rupiah");
+  const [pointsPerTransaction, setPointsPerTransaction] = useState("0");
+  const [rupiahStep, setRupiahStep] = useState("10000");
+  const [pointsPerStep, setPointsPerStep] = useState("1");
 
-  const formatRupiahInput = (value: string) => {
+  const formatNumberInput = (value: string) => {
     const digits = value.replace(/\D/g, "");
     if (!digits) return "";
     return new Intl.NumberFormat("id-ID").format(Number(digits));
@@ -22,9 +24,11 @@ export default function SettingLoyalty() {
   useEffect(() => {
     const load = async () => {
       try {
-        const row = await api.getLoyaltySetting();
-        setTipe(row.tipe);
-        setNilai(String(row.nilai));
+        const row = await api.getPointSetting();
+        setMode(row.mode);
+        setPointsPerTransaction(String(row.pointsPerTransaction ?? 0));
+        setRupiahStep(String(row.rupiahStep ?? 10000));
+        setPointsPerStep(String(row.pointsPerStep ?? 1));
       } catch (error) {
         toast({
           title: "Gagal memuat setting",
@@ -37,15 +41,16 @@ export default function SettingLoyalty() {
   }, []);
 
   const handleSave = async () => {
-    if (!nilai) {
-      toast({ title: "Error", description: "Nilai harus diisi", variant: "destructive" });
-      return;
-    }
     try {
-      await api.updateLoyaltySetting({ tipe, nilai: Number(nilai) });
+      await api.updatePointSetting({
+        mode,
+        pointsPerTransaction: Math.max(0, Math.floor(Number(pointsPerTransaction) || 0)),
+        rupiahStep: Math.max(1, Math.floor(Number(rupiahStep) || 10000)),
+        pointsPerStep: Math.max(0, Math.floor(Number(pointsPerStep) || 0)),
+      });
       toast({
         title: "Berhasil",
-        description: `Loyalty disimpan: ${tipe === "persentase" ? `${nilai}% dari total` : `Rp ${Number(nilai).toLocaleString("id-ID")} per transaksi`}`,
+        description: "Setting poin berhasil disimpan",
       });
     } catch (error) {
       toast({
@@ -58,45 +63,63 @@ export default function SettingLoyalty() {
 
   return (
     <div>
-      <PageHeader title="Setting Loyalty" description="Atur saldo loyalty yang didapat customer tiap transaksi (Paid)" />
+      <PageHeader title="Setting Poin" description="Atur poin yang didapat member setiap transaksi (Paid)" />
 
       <Card className="border-border/50 max-w-lg">
         <CardContent className="p-5 space-y-6">
           <div className="space-y-3">
-            <Label>Tipe Loyalty</Label>
-            <RadioGroup value={tipe} onValueChange={(v) => setTipe(v as "persentase" | "rupiah")} className="flex gap-4">
-              <label className={`flex items-center gap-2 px-4 py-3 rounded-lg border cursor-pointer transition-colors ${tipe === "persentase" ? "border-accent bg-accent/5" : "border-border"}`}>
-                <RadioGroupItem value="persentase" />
-                <span className="text-sm font-medium">Persentase (%)</span>
+            <Label>Mode Poin</Label>
+            <RadioGroup value={mode} onValueChange={(v) => setMode(v as "per_transaction" | "per_rupiah")} className="flex gap-4">
+              <label className={`flex items-center gap-2 px-4 py-3 rounded-lg border cursor-pointer transition-colors ${mode === "per_transaction" ? "border-accent bg-accent/5" : "border-border"}`}>
+                <RadioGroupItem value="per_transaction" />
+                <span className="text-sm font-medium">Per transaksi</span>
               </label>
-              <label className={`flex items-center gap-2 px-4 py-3 rounded-lg border cursor-pointer transition-colors ${tipe === "rupiah" ? "border-accent bg-accent/5" : "border-border"}`}>
-                <RadioGroupItem value="rupiah" />
-                <span className="text-sm font-medium">Rupiah (Rp)</span>
+              <label className={`flex items-center gap-2 px-4 py-3 rounded-lg border cursor-pointer transition-colors ${mode === "per_rupiah" ? "border-accent bg-accent/5" : "border-border"}`}>
+                <RadioGroupItem value="per_rupiah" />
+                <span className="text-sm font-medium">Per rupiah</span>
               </label>
             </RadioGroup>
           </div>
 
-          <div className="space-y-2">
-            <Label>{tipe === "persentase" ? "Persentase Loyalty" : "Nominal Loyalty"}</Label>
-            <div className="relative">
+          {mode === "per_transaction" ? (
+            <div className="space-y-2">
+              <Label>Poin per transaksi</Label>
               <Input
                 type="text"
                 inputMode="numeric"
-                value={tipe === "rupiah" ? formatRupiahInput(nilai) : nilai}
-                onChange={(e) => setNilai(sanitizeNumberInput(e.target.value))}
-                className="pr-14"
-                placeholder={tipe === "persentase" ? "1" : "5000"}
+                value={formatNumberInput(pointsPerTransaction)}
+                onChange={(e) => setPointsPerTransaction(sanitizeNumberInput(e.target.value))}
+                placeholder="10"
               />
-              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground font-medium">
-                {tipe === "persentase" ? "%" : "Rp"}
-              </span>
+              <p className="text-xs text-muted-foreground">Member akan mendapat poin tetap setiap transaksi yang dibayar.</p>
             </div>
-            <p className="text-xs text-muted-foreground">
-              {tipe === "persentase"
-                ? "Saldo loyalty = persentase dari total transaksi (dibulatkan)"
-                : "Saldo loyalty = nominal tetap per transaksi yang dibayar"}
-            </p>
-          </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="space-y-2">
+                <Label>Setiap (Rp)</Label>
+                <Input
+                  type="text"
+                  inputMode="numeric"
+                  value={formatNumberInput(rupiahStep)}
+                  onChange={(e) => setRupiahStep(sanitizeNumberInput(e.target.value))}
+                  placeholder="10000"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Dapat poin</Label>
+                <Input
+                  type="text"
+                  inputMode="numeric"
+                  value={formatNumberInput(pointsPerStep)}
+                  onChange={(e) => setPointsPerStep(sanitizeNumberInput(e.target.value))}
+                  placeholder="1"
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Contoh: setiap Rp 10.000 dapat 1 poin (dibulatkan ke bawah).
+              </p>
+            </div>
+          )}
 
           <Button onClick={handleSave} className="w-full bg-accent text-accent-foreground hover:bg-accent/90">
             Simpan Setting
@@ -106,4 +129,3 @@ export default function SettingLoyalty() {
     </div>
   );
 }
-

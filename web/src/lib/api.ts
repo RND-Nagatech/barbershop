@@ -172,9 +172,11 @@ export interface DashboardPayload {
 export interface FinanceRow {
   kode: string;
   nama: string;
-  tipe?: "Layanan" | "Produk";
+  tipe?: "Layanan" | "Produk" | "Tambah Kas" | "Ambil Kas";
   jumlah: number;
-  total: number;
+  jumlahIn: number;
+  jumlahOut: number;
+  deskripsi?: string;
 }
 
 export interface EmployeeReportRow {
@@ -244,6 +246,34 @@ export type TransactionItemsResponse = {
   }>;
 };
 
+export type TransactionItemsGroupedResponse = {
+  from: string;
+  to: string;
+  includeVoid: boolean;
+  groups: Array<{
+    saleId: string;
+    saleCode: string;
+    bookingCode: string;
+    paidAt: string;
+    paidYmd: string;
+    customerName: string;
+    customerPhone: string;
+    barber: string;
+    status: "Paid" | "Void";
+    total: number;
+    discountTotal: number;
+    items: Array<{
+      type: "service" | "product";
+      kode: string;
+      nama: string;
+      qty: number;
+      harga: number;
+      subtotal: number;
+      isCompliment?: boolean;
+    }>;
+  }>;
+};
+
 export interface QueuePreview {
   queueDate: string;
   nextAntrian: number;
@@ -265,10 +295,12 @@ export interface PayResponse {
   paymentStatus: "Paid";
   paidAt: string;
   saleId: string;
+  saleCode?: string;
   customerName: string;
   customerPhone: string;
   items: SaleItem[];
-  loyaltyEarnedRp: number;
+  loyaltyEarnedRp?: number;
+  pointsEarned?: number;
   total: number;
   received: number;
   change: number;
@@ -277,9 +309,10 @@ export interface PayResponse {
 export interface SaleListItem {
   id: string;
   bookingCode: string;
+  saleCode?: string;
   employeeName: string;
   total: number;
-  method: "Cash" | "Legacy";
+  method: "Cash" | "QRIS" | "Transfer" | "Legacy";
   received: number;
   change: number;
   paidAt: string;
@@ -302,7 +335,7 @@ export interface StockMovementItem {
   kode: string;
   nama: string;
   delta: number;
-  reason: "sale" | "adjust";
+  reason: "sale" | "void" | "adjust";
   refBookingCode: string;
   createdAt: string;
 }
@@ -319,12 +352,20 @@ export interface LoyaltySetting {
   nilai: number;
 }
 
+export interface PointSetting {
+  id: string;
+  mode: "per_transaction" | "per_rupiah";
+  pointsPerTransaction: number;
+  rupiahStep: number;
+  pointsPerStep: number;
+}
+
 export interface CustomerItem {
   id: string;
   phone: string;
   name: string;
   isMember: boolean;
-  loyaltyBalanceRp: number;
+  pointsBalance: number;
   visitCount: number;
   lastVisitAt?: string;
   createdAt: string;
@@ -349,6 +390,19 @@ export const api = {
   updateProduct: (id: string, payload: Omit<Product, "id">) => request<Product>(`/products/${id}`, "PUT", payload),
   deleteProduct: (id: string) => request<void>(`/products/${id}`, "DELETE"),
   adjustProductStock: (id: string, delta: number) => request<Product>(`/products/${id}/adjust-stock`, "PATCH", { delta }),
+
+  cashIn: (amount: number, description: string) => request(`/cash/in`, "POST", { amount, description }),
+  cashOut: (amount: number, description: string) => request(`/cash/out`, "POST", { amount, description }),
+  getCashMovements: (params?: { from?: string; to?: string; direction?: "in" | "out" }) => {
+    const query = new URLSearchParams();
+    if (params?.from) query.set("from", params.from);
+    if (params?.to) query.set("to", params.to);
+    if (params?.direction) query.set("direction", params.direction);
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return request<Array<{ id: string; ymd: string; direction: "in" | "out"; amount: number; description: string; createdBy: string; createdAt: string }>>(
+      `/cash/movements${suffix}`,
+    );
+  },
 
   getSales: (params?: { from?: string; to?: string; q?: string; includeVoid?: boolean }) => {
     const query = new URLSearchParams();
@@ -421,15 +475,22 @@ export const api = {
   getCommissionSetting: () => request<CommissionSetting>("/settings/commission"),
   updateCommissionSetting: (payload: { tipe: "persentase" | "rupiah"; nilai: number }) => request<CommissionSetting>("/settings/commission", "PUT", payload),
 
+  // Legacy (kept for compatibility, not used by new UI)
   getLoyaltySetting: () => request<LoyaltySetting>("/settings/loyalty"),
   updateLoyaltySetting: (payload: { tipe: "persentase" | "rupiah"; nilai: number }) => request<LoyaltySetting>("/settings/loyalty", "PUT", payload),
 
-  getCustomers: (q?: string) => {
+  getPointSetting: () => request<PointSetting>("/settings/points"),
+  updatePointSetting: (payload: { mode: PointSetting["mode"]; pointsPerTransaction: number; rupiahStep: number; pointsPerStep: number }) =>
+    request<PointSetting>("/settings/points", "PUT", payload),
+
+  getCustomers: (params?: { q?: string; memberOnly?: boolean }) => {
     const query = new URLSearchParams();
-    if (q) query.set("q", q);
+    if (params?.q) query.set("q", params.q);
+    if (params?.memberOnly) query.set("memberOnly", "1");
     const suffix = query.toString() ? `?${query.toString()}` : "";
     return request<CustomerItem[]>(`/customers${suffix}`);
   },
+  createCustomer: (payload: { phone?: string; name: string; isMember: boolean }) => request<CustomerItem>("/customers", "POST", payload),
   updateCustomer: (id: string, payload: { phone?: string; name: string; isMember: boolean }) =>
     request<CustomerItem>(`/customers/${id}`, "PUT", payload),
   getCustomerSales: (id: string) =>
@@ -456,6 +517,13 @@ export const api = {
   createBooking: (payload: { customerName: string; phone: string; employeeName?: string; services: BookingService[]; branchDomain?: string }) =>
     request<BookingItem>("/bookings", "POST", payload),
   payBooking: (id: string, received: number) => request<PayResponse>(`/bookings/${id}/pay`, "POST", { received }),
+  createDirectSale: (payload: {
+    customerType: "member" | "regular";
+    customerName?: string;
+    customerPhone?: string;
+    items: Array<{ kode: string; qty: number; isCompliment?: boolean }>;
+    received: number;
+  }) => request<PayResponse>("/sales", "POST", payload),
   addServiceToBooking: (id: string, serviceKode: string) => request<{ id: string; bookingCode: string; services: BookingService[] }>(`/bookings/${id}/add-service`, "POST", { serviceKode }),
   addProductToBooking: (id: string, productKode: string, qty: number, isCompliment?: boolean) =>
     request<{ id: string; bookingCode: string; products: BookingProduct[] }>(`/bookings/${id}/add-product`, "POST", { productKode, qty, isCompliment: Boolean(isCompliment) }),
@@ -470,10 +538,13 @@ export const api = {
   completeBooking: (id: string) => request(`/bookings/${id}/complete`, "PATCH"),
 
   getDashboard: () => request<DashboardPayload>("/dashboard"),
-  getFinanceReport: (params?: { from?: string; to?: string }) => {
+  getFinanceReport: (params?: { from?: string; to?: string; view?: "recap" | "detail"; jenis?: "all" | "service" | "product" | "cash_in" | "cash_out"; kode?: string }) => {
     const query = new URLSearchParams();
     if (params?.from) query.set("from", params.from);
     if (params?.to) query.set("to", params.to);
+    if (params?.view) query.set("view", params.view);
+    if (params?.jenis) query.set("jenis", params.jenis);
+    if (params?.kode) query.set("kode", params.kode);
     const suffix = query.toString() ? `?${query.toString()}` : "";
     return request<FinanceRow[]>(`/reports/finance${suffix}`);
   },
@@ -507,5 +578,14 @@ export const api = {
     if (params.saleCode) query.set("saleCode", params.saleCode);
     if (params.bookingCode) query.set("bookingCode", params.bookingCode);
     return request<TransactionItemsResponse>(`/reports/transactions/items?${query.toString()}`);
+  },
+  getTransactionItemsGrouped: (params?: { from?: string; to?: string; q?: string; includeVoid?: boolean }) => {
+    const query = new URLSearchParams();
+    if (params?.from) query.set("from", params.from);
+    if (params?.to) query.set("to", params.to);
+    if (params?.q) query.set("q", params.q);
+    if (params?.includeVoid) query.set("includeVoid", "1");
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return request<TransactionItemsGroupedResponse>(`/reports/transactions/items-grouped${suffix}`);
   },
 };

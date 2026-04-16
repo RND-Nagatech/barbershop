@@ -17,6 +17,8 @@ const allMenus = [
   "Input Booking",
   "Booked",
   "Kasir / Pembayaran",
+  "Tambah Uang Kas",
+  "Ambil Uang Kas",
   "Riwayat Transaksi",
   "Laporan Transaksi",
   "Laporan Keuangan",
@@ -26,7 +28,7 @@ const allMenus = [
   "Data User",
   "Hak Akses User",
   "Setting Komisi",
-  "Setting Loyalty",
+  "Setting Poin",
 ];
 
 export default function HakAkses() {
@@ -55,7 +57,12 @@ export default function HakAkses() {
     setSelectedUser(username);
     try {
       const payload = await api.getAccessByUsername(username);
-      setAccessMenus(payload.menuAccess || []);
+      const mapped = (payload.menuAccess || []).map((m) => {
+        if (m === "Member") return "Customer / Member";
+        if (m === "Setting Loyalty") return "Setting Poin";
+        return m;
+      });
+      setAccessMenus(mapped);
     } catch (error) {
       toast({
         title: "Gagal memuat hak akses",
