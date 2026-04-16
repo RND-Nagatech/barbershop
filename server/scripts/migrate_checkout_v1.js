@@ -23,7 +23,7 @@ const run = async () => {
 
   const bookings = db.collection("bookings");
   const sales = db.collection("sales");
-  const customers = db.collection("customers");
+  const customers = db.collection("tm_customer");
 
   console.log("Connected. Ensuring indexes...");
 

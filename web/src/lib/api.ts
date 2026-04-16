@@ -374,22 +374,23 @@ export interface CustomerItem {
 export const api = {
   login: (username: string, password: string) => request<{ user: UserItem; token: string }>("/auth/login", "POST", { username, password }),
 
-  getEmployees: () => request<Employee[]>("/employees"),
-  createEmployee: (payload: Omit<Employee, "id">) => request<Employee>("/employees", "POST", payload),
-  updateEmployee: (id: string, payload: Omit<Employee, "id">) => request<Employee>(`/employees/${id}`, "PUT", payload),
-  deleteEmployee: (id: string) => request<void>(`/employees/${id}`, "DELETE"),
 
-  getServices: () => request<Service[]>("/services"),
-  createService: (payload: Omit<Service, "id">) => request<Service>("/services", "POST", payload),
-  updateService: (id: string, payload: Omit<Service, "id">) => request<Service>(`/services/${id}`, "PUT", payload),
-  deleteService: (id: string) => request<void>(`/services/${id}`, "DELETE"),
+  getEmployees: () => request<Employee[]>("/pegawai"),
+  createEmployee: (payload: Omit<Employee, "id">) => request<Employee>("/pegawai", "POST", payload),
+  updateEmployee: (id: string, payload: Omit<Employee, "id">) => request<Employee>(`/pegawai/${id}`, "PUT", payload),
+  deleteEmployee: (id: string) => request<void>(`/pegawai/${id}`, "DELETE"),
 
-  getProducts: () => request<Product[]>("/products"),
-  getLowStockProducts: () => request<Product[]>("/products/low-stock"),
-  createProduct: (payload: Omit<Product, "id">) => request<Product>("/products", "POST", payload),
-  updateProduct: (id: string, payload: Omit<Product, "id">) => request<Product>(`/products/${id}`, "PUT", payload),
-  deleteProduct: (id: string) => request<void>(`/products/${id}`, "DELETE"),
-  adjustProductStock: (id: string, delta: number) => request<Product>(`/products/${id}/adjust-stock`, "PATCH", { delta }),
+  getServices: () => request<Service[]>("/layanan"),
+  createService: (payload: Omit<Service, "id">) => request<Service>("/layanan", "POST", payload),
+  updateService: (id: string, payload: Omit<Service, "id">) => request<Service>(`/layanan/${id}`, "PUT", payload),
+  deleteService: (id: string) => request<void>(`/layanan/${id}`, "DELETE"),
+
+  getProducts: () => request<Product[]>("/produk"),
+  getLowStockProducts: () => request<Product[]>("/produk/low-stock"),
+  createProduct: (payload: Omit<Product, "id">) => request<Product>("/produk", "POST", payload),
+  updateProduct: (id: string, payload: Omit<Product, "id">) => request<Product>(`/produk/${id}`, "PUT", payload),
+  deleteProduct: (id: string) => request<void>(`/produk/${id}`, "DELETE"),
+  adjustProductStock: (id: string, delta: number) => request<Product>(`/produk/${id}/adjust-stock`, "PATCH", { delta }),
 
   cashIn: (amount: number, description: string) => request(`/cash/in`, "POST", { amount, description }),
   cashOut: (amount: number, description: string) => request(`/cash/out`, "POST", { amount, description }),
@@ -488,14 +489,14 @@ export const api = {
     if (params?.q) query.set("q", params.q);
     if (params?.memberOnly) query.set("memberOnly", "1");
     const suffix = query.toString() ? `?${query.toString()}` : "";
-    return request<CustomerItem[]>(`/customers${suffix}`);
+    return request<CustomerItem[]>(`/customer${suffix}`);
   },
-  createCustomer: (payload: { phone?: string; name: string; isMember: boolean }) => request<CustomerItem>("/customers", "POST", payload),
+  createCustomer: (payload: { phone?: string; name: string; isMember: boolean }) => request<CustomerItem>("/customer", "POST", payload),
   updateCustomer: (id: string, payload: { phone?: string; name: string; isMember: boolean }) =>
-    request<CustomerItem>(`/customers/${id}`, "PUT", payload),
+    request<CustomerItem>(`/customer/${id}`, "PUT", payload),
   getCustomerSales: (id: string) =>
     request<Array<{ id: string; bookingCode: string; total: number; status: "Paid" | "Void"; paidAt: string; paidYmd: string }>>(
-      `/customers/${id}/sales`,
+      `/customer/${id}/sales`,
     ),
 
   getBookings: (params?: { from?: string; to?: string; status?: string; paymentStatus?: string; branchDomain?: string }) => {
