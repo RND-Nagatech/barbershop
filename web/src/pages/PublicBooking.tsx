@@ -9,6 +9,7 @@ import { toast } from "@/hooks/use-toast";
 import { api, type BookingItem, type Branch, type PublicBookingStatus, type Service } from "@/lib/api";
 import { saveAs } from "file-saver";
 import { Loader2 } from "lucide-react";
+import { normalizePhone } from "@/lib/phone";
 
 export default function PublicBooking() {
   const [searchParams] = useSearchParams();
@@ -25,6 +26,11 @@ export default function PublicBooking() {
     namaCustomer: "",
     noHp: "",
   });
+  const [customerType, setCustomerType] = useState<"regular" | "member">("regular");
+  const [memberLoading, setMemberLoading] = useState(false);
+  const [memberFound, setMemberFound] = useState(false);
+  const [productLite, setProductLite] = useState<Array<{ kode: string; nama: string }>>([]);
+  const [queuePreview, setQueuePreview] = useState(0);
   const [selectedServices, setSelectedServices] = useState<string[]>([]);
 
   const storageKey = "public_bookings:v1";
@@ -48,12 +54,16 @@ export default function PublicBooking() {
   useEffect(() => {
     const load = async () => {
       try {
-        const [branchRow, serviceRows] = await Promise.all([
+        const [branchRow, serviceRows, productRows, preview] = await Promise.all([
           domainParam ? api.getBranchByDomain(domainParam) : api.getPublicBranch(),
           api.getServices(),
+          api.getPublicProductsLite().catch(() => [] as Array<{ kode: string; nama: string }>),
+          api.getQueuePreview().catch(() => ({ queueDate: "", nextAntrian: 0, nextBookingCode: "" })),
         ]);
         setBranch(branchRow);
         setServices(serviceRows);
+        setProductLite(productRows);
+        setQueuePreview(preview.nextAntrian || 0);
       } catch (error) {
         toast({
           title: "Gagal memuat data",
@@ -67,6 +77,43 @@ export default function PublicBooking() {
 
     void load();
   }, [domainParam]);
+
+  useEffect(() => {
+    if (customerType !== "member") {
+      setMemberLoading(false);
+      setMemberFound(false);
+      return;
+    }
+    const phone = normalizePhone(form.noHp);
+    if (!phone) {
+      setMemberLoading(false);
+      setMemberFound(false);
+      setForm((prev) => ({ ...prev, namaCustomer: "" }));
+      return;
+    }
+
+    let cancelled = false;
+    setMemberLoading(true);
+    const t = window.setTimeout(async () => {
+      try {
+        const res = await api.publicMemberLookup(phone);
+        if (cancelled) return;
+        setMemberFound(Boolean(res.found));
+        setForm((prev) => ({ ...prev, namaCustomer: res.found ? (res.name || "") : "" }));
+      } catch {
+        if (cancelled) return;
+        setMemberFound(false);
+        setForm((prev) => ({ ...prev, namaCustomer: "" }));
+      } finally {
+        if (!cancelled) setMemberLoading(false);
+      }
+    }, 350);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t);
+    };
+  }, [customerType, form.noHp]);
 
   useEffect(() => {
     try {
@@ -132,9 +179,19 @@ export default function PublicBooking() {
     [services, selectedServices],
   );
 
+  const productNameByKode = useMemo(() => {
+    const map: Record<string, string> = {};
+    productLite.forEach((p) => (map[p.kode] = p.nama));
+    return map;
+  }, [productLite]);
+
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
 
+    if (customerType === "member" && !memberFound) {
+      toast({ title: "Member tidak ditemukan", description: "Pastikan No. HP terdaftar sebagai member.", variant: "destructive" });
+      return;
+    }
     if (!form.namaCustomer || selectedServices.length === 0) {
       toast({ title: "Error", description: "Lengkapi semua data booking", variant: "destructive" });
       return;
@@ -157,6 +214,7 @@ export default function PublicBooking() {
         persistBookings(next);
         return next;
       });
+      void api.getQueuePreview().then((p) => setQueuePreview(p.nextAntrian || 0)).catch(() => {});
       toast({ title: "Berhasil", description: `Booking ${booking.bookingCode} berhasil disimpan` });
     } catch (error) {
       toast({
@@ -175,6 +233,10 @@ export default function PublicBooking() {
     setLastCreated(null);
     setForm({ namaCustomer: "", noHp: "" });
     setSelectedServices([]);
+    setCustomerType("regular");
+    setMemberLoading(false);
+    setMemberFound(false);
+    void api.getQueuePreview().then((p) => setQueuePreview(p.nextAntrian || 0)).catch(() => {});
   };
 
   const refreshStatusesNow = async () => {
@@ -399,44 +461,122 @@ export default function PublicBooking() {
         ) : (
           <Card className="border-border/50">
             <CardContent className="p-6">
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div className="space-y-2">
-                  <Label>Nama Customer</Label>
-                  <Input value={form.namaCustomer} onChange={(e) => setForm({ ...form, namaCustomer: e.target.value })} />
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div className="lg:col-span-2">
+                  <form onSubmit={handleSubmit} className="space-y-4">
+                    <div className="space-y-2">
+                      <Label>Tipe Customer</Label>
+                      <div className="flex gap-2">
+                        <Button
+                          type="button"
+                          variant={customerType === "regular" ? "default" : "outline"}
+                          className={customerType === "regular" ? "bg-accent text-accent-foreground hover:bg-accent/90" : ""}
+                          onClick={() => setCustomerType("regular")}
+                        >
+                          Reguler
+                        </Button>
+                        <Button
+                          type="button"
+                          variant={customerType === "member" ? "default" : "outline"}
+                          className={customerType === "member" ? "bg-accent text-accent-foreground hover:bg-accent/90" : ""}
+                          onClick={() => setCustomerType("member")}
+                        >
+                          Member
+                        </Button>
+                      </div>
+                      {customerType === "member" && (
+                        <p className="text-xs text-muted-foreground">
+                          {memberLoading ? "Mencari member..." : memberFound ? `Member: ${form.namaCustomer}` : "Masukkan No. HP member untuk mengambil nama otomatis."}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label>Nama Customer</Label>
+                        <Input
+                          value={form.namaCustomer}
+                          disabled={customerType === "member"}
+                          onChange={(e) => setForm({ ...form, namaCustomer: e.target.value })}
+                          placeholder={customerType === "member" ? "Otomatis dari member" : "Nama lengkap"}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>No. HP</Label>
+                        <Input value={form.noHp} onChange={(e) => setForm({ ...form, noHp: e.target.value })} />
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Pilih Layanan</Label>
+                      <div className="space-y-2">
+                        {services.map((service) => (
+                          <label key={service.kode} className="flex items-center justify-between rounded-lg border p-3">
+                            <div className="flex items-center gap-3">
+                              <Checkbox
+                                checked={selectedServices.includes(service.kode)}
+                                onCheckedChange={() => toggleService(service.kode)}
+                              />
+                              <div>
+                                <p className="text-sm font-medium">{service.nama}</p>
+                                <p className="text-xs text-muted-foreground">{service.kode}</p>
+                              </div>
+                            </div>
+                            <span className="text-sm font-medium">{formatRp(service.harga)}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+
+                    <Button type="submit" className="w-full bg-accent text-accent-foreground hover:bg-accent/90">
+                      Simpan Booking
+                    </Button>
+                  </form>
                 </div>
-                <div className="space-y-2">
-                  <Label>No. HP</Label>
-                  <Input value={form.noHp} onChange={(e) => setForm({ ...form, noHp: e.target.value })} />
-                </div>
-                {/* Input pegawai disembunyikan, assign dilakukan di menu Booked */}
-                <div className="space-y-2">
-                  <Label>Pilih Layanan</Label>
-                  <div className="space-y-2">
-                    {services.map((service) => (
-                      <label key={service.kode} className="flex items-center justify-between rounded-lg border p-3">
-                        <div className="flex items-center gap-3">
-                          <Checkbox
-                            checked={selectedServices.includes(service.kode)}
-                            onCheckedChange={() => toggleService(service.kode)}
-                          />
-                          <div>
-                            <p className="text-sm font-medium">{service.nama}</p>
-                            <p className="text-xs text-muted-foreground">{service.kode}</p>
-                          </div>
+
+                <div>
+                  <Card className="border-border/50 sticky top-6">
+                    <CardContent className="p-5">
+                      <h3 className="font-semibold mb-3">Ringkasan</h3>
+                      <div className="space-y-3 text-sm">
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">No. Antrian</span>
+                          <span className="font-display text-2xl font-bold text-accent">{queuePreview || "-"}</span>
                         </div>
-                        <span className="text-sm font-medium">{formatRp(service.harga)}</span>
-                      </label>
-                    ))}
-                  </div>
+                        <hr className="border-border" />
+                        {selectedServices.length > 0 ? (
+                          services
+                            .filter((s) => selectedServices.includes(s.kode))
+                            .map((s) => {
+                              const compliments = Array.isArray(s.compliments) ? s.compliments : [];
+                              const complimentText = compliments
+                                .map((c) => `${productNameByKode[c.kode] || c.kode} x${c.qty || 1}`)
+                                .join(", ");
+                              return (
+                                <div key={s.kode} className="space-y-1">
+                                  <div className="flex justify-between">
+                                    <span>{s.nama}</span>
+                                    <span>{formatRp(s.harga)}</span>
+                                  </div>
+                                  {compliments.length > 0 && (
+                                    <div className="text-xs text-destructive">Compliment: {complimentText}</div>
+                                  )}
+                                </div>
+                              );
+                            })
+                        ) : (
+                          <p className="text-muted-foreground text-center py-2">Belum ada layanan dipilih</p>
+                        )}
+                        <hr className="border-border" />
+                        <div className="flex justify-between font-semibold text-base">
+                          <span>Total</span>
+                          <span>{formatRp(total)}</span>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
                 </div>
-                <div className="flex items-center justify-between rounded-lg bg-muted px-4 py-3 text-sm">
-                  <span>Total</span>
-                  <span className="font-semibold">{formatRp(total)}</span>
-                </div>
-                <Button type="submit" className="w-full bg-accent text-accent-foreground hover:bg-accent/90">
-                  Simpan Booking
-                </Button>
-              </form>
+              </div>
             </CardContent>
           </Card>
         )}

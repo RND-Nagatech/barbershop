@@ -61,6 +61,9 @@ const startSocket = async () => {
     printQRInTerminal: false,
     auth: authState,
     browser: ["Barbershop", "Chrome", "1.0.0"],
+    // Helps stabilize companion connection & key sync for some setups
+    syncFullHistory: true,
+    markOnlineOnConnect: true,
     ...(state.baileysVersion ? { version: state.baileysVersion } : {}),
   });
 
@@ -237,12 +240,20 @@ export const waGateway = {
 
   sendText: async (phone, text) => {
     const normalized = normalizeWaPhoneId(phone);
-    if (!normalized) return false;
-    const okConn = await ensureConnected({ timeoutMs: 5000 });
-    if (!okConn || !state.socket || state.status !== "connected") return false;
+    if (!normalized) {
+      state.lastError = "No HP tidak valid";
+      return false;
+    }
+    // Important: don't auto-connect here. If WA is disconnected, we skip sending
+    // to avoid messages stuck in "menunggu pesan" state.
+    if (!state.socket || state.status !== "connected") {
+      state.lastError = "WhatsApp belum terhubung (scan QR dulu)";
+      return false;
+    }
     try {
       const jid = `${normalized}@s.whatsapp.net`;
       await state.socket.sendMessage(jid, { text: String(text || "") });
+      state.lastError = "";
       return true;
     } catch (err) {
       state.lastError = err instanceof Error ? err.message : String(err);
@@ -252,10 +263,20 @@ export const waGateway = {
 
   sendDocument: async (phone, buffer, { fileName = "file.pdf", caption = "", mimetype = "application/pdf" } = {}) => {
     const normalized = normalizeWaPhoneId(phone);
-    if (!normalized) return false;
-    const okConn = await ensureConnected({ timeoutMs: 8000 });
-    if (!okConn || !state.socket || state.status !== "connected") return false;
-    if (!buffer) return false;
+    if (!normalized) {
+      state.lastError = "No HP tidak valid";
+      return false;
+    }
+    // Important: don't auto-connect here. If WA is disconnected, we skip sending
+    // to avoid messages stuck in "menunggu pesan" state.
+    if (!state.socket || state.status !== "connected") {
+      state.lastError = "WhatsApp belum terhubung (scan QR dulu)";
+      return false;
+    }
+    if (!buffer) {
+      state.lastError = "File kosong";
+      return false;
+    }
     try {
       const jid = `${normalized}@s.whatsapp.net`;
       await state.socket.sendMessage(jid, {
@@ -264,6 +285,7 @@ export const waGateway = {
         fileName,
         ...(caption ? { caption: String(caption) } : {}),
       });
+      state.lastError = "";
       return true;
     } catch (err) {
       state.lastError = err instanceof Error ? err.message : String(err);

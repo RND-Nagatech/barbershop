@@ -4,38 +4,46 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { FileSpreadsheet, FileText } from "lucide-react";
 import { exportToExcel, exportToPDF } from "@/lib/exportUtils";
-import { api, type FinanceRow, type Product, type Service } from "@/lib/api";
+import { api, type FinanceRowDetail, type FinanceRowRecap } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
 import { formatLocalYmd } from "@/lib/date";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
+import { buildPeriodeText, getActiveBranchName } from "@/lib/reportHeader";
 
 const formatRp = (n: number) =>
   new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(n);
 
 export default function LaporanKeuangan() {
   const getToday = () => formatLocalYmd(new Date()) ?? "";
-  const [data, setData] = useState<FinanceRow[]>([]);
+  const [data, setData] = useState<Array<FinanceRowRecap | FinanceRowDetail>>([]);
   const [from, setFrom] = useState(getToday());
   const [to, setTo] = useState(getToday());
   const [view, setView] = useState<"recap" | "detail">("recap");
-  const [jenis, setJenis] = useState<"all" | "service" | "product" | "cash_in" | "cash_out">("all");
-  const [kode, setKode] = useState<string>("all");
-  const [services, setServices] = useState<Service[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
+  const [jenisTrx, setJenisTrx] = useState<"all" | "layanan" | "produk" | "kas">("all");
+  const [kategori, setKategori] = useState<string>("all");
+  const [kategoriOptions, setKategoriOptions] = useState<string[]>([]);
+  const [branchName, setBranchName] = useState("");
+
+  useEffect(() => {
+    void getActiveBranchName().then(setBranchName);
+  }, []);
 
   useEffect(() => {
     const load = async () => {
       try {
-        if (services.length === 0) setServices(await api.getServices());
-        if (products.length === 0) setProducts(await api.getProducts());
+        const cats = await api.getFinanceCategories({ from, to, jenisTrx });
+        setKategoriOptions(cats);
+        if (kategori !== "all" && cats.length > 0 && !cats.includes(kategori)) {
+          setKategori("all");
+        }
         setData(
           await api.getFinanceReport({
             from,
             to,
             view,
-            jenis,
-            kode: jenis === "service" || jenis === "product" ? (kode !== "all" ? kode : undefined) : undefined,
+            jenisTrx,
+            kategori: kategori !== "all" ? kategori : undefined,
           }),
         );
       } catch (error) {
@@ -48,37 +56,52 @@ export default function LaporanKeuangan() {
     };
 
     void load();
-  }, [from, to, view, jenis, kode]);
-
-  useEffect(() => {
-    setKode("all");
-  }, [jenis]);
+  }, [from, to, view, jenisTrx, kategori]);
 
   const totals = useMemo(() => {
-    const jumlahIn = data.reduce((sum, d) => sum + (Number(d.jumlahIn) || 0), 0);
-    const jumlahOut = data.reduce((sum, d) => sum + (Number(d.jumlahOut) || 0), 0);
-    return { jumlahIn, jumlahOut };
+    const uangMasuk = data.reduce((sum, d) => sum + (Number(d.uangMasuk) || 0), 0);
+    const uangKeluar = data.reduce((sum, d) => sum + (Number(d.uangKeluar) || 0), 0);
+    return { uangMasuk, uangKeluar, saldoAkhir: uangMasuk - uangKeluar };
   }, [data]);
 
   const headers = view === "detail"
-    ? ["Tipe", "Kode", "Nama", "Jumlah", "Jumlah In", "Jumlah Out", "Deskripsi"]
-    : ["Tipe", "Kode", "Nama", "Jumlah", "Jumlah In", "Jumlah Out"];
+    ? ["Kategori", "Jenis Trx", "Deskripsi", "Uang Masuk", "Uang Keluar"]
+    : ["Kategori", "Jenis Trx", "Uang Masuk", "Uang Keluar"];
 
-  const rows =
+  const rows = view === "detail"
+    ? (data as FinanceRowDetail[]).map((d) => [
+        d.kategori || "-",
+        d.jenisTrx || "-",
+        d.deskripsi || "-",
+        formatRp(d.uangMasuk || 0),
+        formatRp(d.uangKeluar || 0),
+      ])
+    : (data as FinanceRowRecap[]).map((d) => [
+        d.kategori || "-",
+        d.jenisTrx || "-",
+        formatRp(d.uangMasuk || 0),
+        formatRp(d.uangKeluar || 0),
+      ]);
+
+  const footerRows: (string | number)[][] =
     view === "detail"
-      ? data.map((d) => [d.tipe || "-", d.kode, d.nama, d.jumlah, formatRp(d.jumlahIn), formatRp(d.jumlahOut), d.deskripsi || "-"])
-      : data.map((d) => [d.tipe || "-", d.kode, d.nama, d.jumlah, formatRp(d.jumlahIn), formatRp(d.jumlahOut)]);
+      ? [
+          ["TOTAL", "", "", formatRp(totals.uangMasuk), formatRp(totals.uangKeluar)],
+          ["Saldo Akhir", "", "", "", formatRp(totals.saldoAkhir)],
+        ]
+      : [
+          ["TOTAL", "", formatRp(totals.uangMasuk), formatRp(totals.uangKeluar)],
+          ["Saldo Akhir", "", "", formatRp(totals.saldoAkhir)],
+        ];
 
-  const footer = view === "detail"
-    ? ["", "", "TOTAL", "", formatRp(totals.jumlahIn), formatRp(totals.jumlahOut), ""]
-    : ["", "", "TOTAL", "", formatRp(totals.jumlahIn), formatRp(totals.jumlahOut)];
-
-  const handleExcel = () => exportToExcel("Laporan Keuangan", headers, rows, "laporan_keuangan", footer);
-  const handlePDF = () => exportToPDF("Laporan Keuangan", headers, rows, "laporan_keuangan", footer);
+  const periodText = buildPeriodeText(from, to, getToday());
+  const meta = { periodText, branchName };
+  const handleExcel = () => exportToExcel("Laporan Keuangan", headers, rows, "laporan_keuangan", footerRows, meta);
+  const handlePDF = () => exportToPDF("Laporan Keuangan", headers, rows, "laporan_keuangan", footerRows, meta);
 
   return (
     <div>
-      <PageHeader title="Laporan Keuangan" description="Ringkasan pendapatan per layanan">
+      <PageHeader title="Laporan Keuangan" description="Ringkasan arus kas">
         <Button variant="outline" size="sm" onClick={handleExcel}>
           <FileSpreadsheet className="w-4 h-4 mr-2" /> Excel
         </Button>
@@ -113,58 +136,36 @@ export default function LaporanKeuangan() {
         </div>
 
         <div className="w-56">
-          <label className="block text-sm mb-1">Jenis Transaksi</label>
-          <Select value={jenis} onValueChange={(v) => setJenis(v as typeof jenis)}>
+          <label className="block text-sm mb-1">Jenis Trx</label>
+          <Select value={jenisTrx} onValueChange={(v) => setJenisTrx(v as typeof jenisTrx)}>
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Semua</SelectItem>
-              <SelectItem value="service">Layanan</SelectItem>
-              <SelectItem value="product">Produk</SelectItem>
-              <SelectItem value="cash_in">Tambah Kas</SelectItem>
-              <SelectItem value="cash_out">Ambil Kas</SelectItem>
+              <SelectItem value="layanan">LAYANAN</SelectItem>
+              <SelectItem value="produk">PRODUK</SelectItem>
+              <SelectItem value="kas">KAS</SelectItem>
             </SelectContent>
           </Select>
         </div>
 
-        {jenis === "service" && (
-          <div className="w-72">
-            <label className="block text-sm mb-1">Jenis Layanan</label>
-            <Select value={kode} onValueChange={setKode}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Semua</SelectItem>
-                {services.map((s) => (
-                  <SelectItem key={s.id} value={s.kode}>
-                    {s.nama} ({s.kode})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        )}
-
-        {jenis === "product" && (
-          <div className="w-72">
-            <label className="block text-sm mb-1">Jenis Produk</label>
-            <Select value={kode} onValueChange={setKode}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Semua</SelectItem>
-                {products.map((p) => (
-                  <SelectItem key={p.id} value={p.kode}>
-                    {p.nama} ({p.kode})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        )}
+        <div className="w-72">
+          <label className="block text-sm mb-1">Kategori</label>
+          <Select value={kategori} onValueChange={setKategori}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Semua</SelectItem>
+              {kategoriOptions.map((k) => (
+                <SelectItem key={k} value={k}>
+                  {k}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       <Card className="border-border/50 mb-6">
@@ -173,34 +174,33 @@ export default function LaporanKeuangan() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b text-left text-muted-foreground">
-                  <th className="pb-3 font-medium">Tipe</th>
-                  <th className="pb-3 font-medium">Kode</th>
-                  <th className="pb-3 font-medium">Nama</th>
-                  <th className="pb-3 font-medium text-center">Jumlah</th>
-                  <th className="pb-3 font-medium text-right">Jumlah In</th>
-                  <th className="pb-3 font-medium text-right">Jumlah Out</th>
+                  <th className="pb-3 font-medium">Kategori</th>
+                  <th className="pb-3 font-medium">Jenis Trx</th>
                   {view === "detail" && <th className="pb-3 font-medium">Deskripsi</th>}
+                  <th className="pb-3 font-medium text-right">Uang Masuk</th>
+                  <th className="pb-3 font-medium text-right">Uang Keluar</th>
                 </tr>
               </thead>
               <tbody>
                 {data.map((d, idx) => (
-                  <tr key={`${d.tipe || "X"}:${d.kode}:${idx}`} className="border-b last:border-0">
-                    <td className="py-3">{d.tipe || "-"}</td>
-                    <td className="py-3 font-medium">{d.kode}</td>
-                    <td className="py-3">{d.nama}</td>
-                    <td className="py-3 text-center">{d.jumlah}</td>
-                    <td className="py-3 text-right">{formatRp(d.jumlahIn)}</td>
-                    <td className="py-3 text-right">{formatRp(d.jumlahOut)}</td>
-                    {view === "detail" && <td className="py-3">{d.deskripsi || "-"}</td>}
+                  <tr key={`${d.kategori || "X"}:${d.jenisTrx || "Y"}:${idx}`} className="border-b last:border-0">
+                    <td className="py-3">{d.kategori || "-"}</td>
+                    <td className="py-3 font-medium">{d.jenisTrx || "-"}</td>
+                    {view === "detail" && <td className="py-3">{(d as FinanceRowDetail).deskripsi || "-"}</td>}
+                    <td className="py-3 text-right">{formatRp(d.uangMasuk || 0)}</td>
+                    <td className="py-3 text-right">{formatRp(d.uangKeluar || 0)}</td>
                   </tr>
                 ))}
               </tbody>
               <tfoot>
                 <tr className="border-t-2">
-                  <td colSpan={4} className="py-3 font-display font-bold text-right">TOTAL</td>
-                  <td className="py-3 text-right font-display font-bold text-accent">{formatRp(totals.jumlahIn)}</td>
-                  <td className="py-3 text-right font-display font-bold text-destructive">{formatRp(totals.jumlahOut)}</td>
-                  {view === "detail" && <td />}
+                  <td colSpan={view === "detail" ? 3 : 2} className="py-3 font-display font-bold text-right">TOTAL</td>
+                  <td className="py-3 text-right font-display font-bold text-accent">{formatRp(totals.uangMasuk)}</td>
+                  <td className="py-3 text-right font-display font-bold text-destructive">{formatRp(totals.uangKeluar)}</td>
+                </tr>
+                <tr className="border-t">
+                  <td colSpan={view === "detail" ? 3 : 2} className="py-3 font-display font-bold text-right">Saldo Akhir</td>
+                  <td colSpan={2} className="py-3 text-right font-display font-bold">{formatRp(totals.saldoAkhir)}</td>
                 </tr>
               </tfoot>
             </table>

@@ -13,9 +13,10 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "@/hooks/use-toast";
-import { api, type BookingItem, type PayResponse, type Product } from "@/lib/api";
+import { api, type BookingItem, type CustomerItem, type PayResponse, type Product } from "@/lib/api";
 import { formatLocalYmd } from "@/lib/date";
 import { buildReceiptText, generateReceiptPdf, openEmailReceipt, openReceiptPrintWindow, openWhatsAppReceipt } from "@/lib/receiptUtils";
+import { normalizePhone } from "@/lib/phone";
 
 const formatRp = (n: number) =>
   new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(n);
@@ -62,6 +63,8 @@ export default function KasirPembayaran() {
   const [directCustomerType, setDirectCustomerType] = useState<"member" | "regular">("regular");
   const [directCustomerName, setDirectCustomerName] = useState("");
   const [directCustomerPhone, setDirectCustomerPhone] = useState("");
+  const [directMember, setDirectMember] = useState<CustomerItem | null>(null);
+  const [directMemberLoading, setDirectMemberLoading] = useState(false);
   const [directSelectedProduct, setDirectSelectedProduct] = useState("");
   const [directQty, setDirectQty] = useState("1");
   const [directIsCompliment, setDirectIsCompliment] = useState(false);
@@ -105,6 +108,44 @@ export default function KasirPembayaran() {
     void loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [from, to]);
+
+  useEffect(() => {
+    if (!directOpen) return;
+    if (directCustomerType !== "member") {
+      setDirectMember(null);
+      setDirectMemberLoading(false);
+      return;
+    }
+
+    const phone = normalizePhone(directCustomerPhone);
+    if (!phone) {
+      setDirectMember(null);
+      setDirectMemberLoading(false);
+      setDirectCustomerName("");
+      return;
+    }
+
+    let cancelled = false;
+    setDirectMemberLoading(true);
+    const t = window.setTimeout(async () => {
+      try {
+        const rows = await api.getCustomers({ q: phone, memberOnly: true });
+        if (cancelled) return;
+        const found = rows.find((r) => r.phone === phone) || null;
+        setDirectMember(found);
+        setDirectCustomerName(found?.name?.toUpperCase?.() ? found.name.toUpperCase() : (found?.name || "").toUpperCase());
+      } catch {
+        if (!cancelled) setDirectMember(null);
+      } finally {
+        if (!cancelled) setDirectMemberLoading(false);
+      }
+    }, 350);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t);
+    };
+  }, [directOpen, directCustomerType, directCustomerPhone]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -214,6 +255,8 @@ export default function KasirPembayaran() {
     setDirectCustomerType("regular");
     setDirectCustomerName("");
     setDirectCustomerPhone("");
+    setDirectMember(null);
+    setDirectMemberLoading(false);
     setDirectSelectedProduct("");
     setDirectQty("1");
     setDirectIsCompliment(false);
@@ -257,6 +300,10 @@ export default function KasirPembayaran() {
       }
       if (directCustomerType === "member" && !directCustomerPhone.trim()) {
         toast({ title: "Error", description: "No HP member wajib diisi", variant: "destructive" });
+        return;
+      }
+      if (directCustomerType === "member" && (!directMember || !directMember.isMember)) {
+        toast({ title: "Member tidak ditemukan", description: "Pastikan No. HP terdaftar sebagai member.", variant: "destructive" });
         return;
       }
       const paid = await api.createDirectSale({
@@ -566,7 +613,19 @@ export default function KasirPembayaran() {
               </div>
               <div className="space-y-1">
                 <label className="text-muted-foreground text-xs">Nama (opsional)</label>
-                <Input value={directCustomerName} autoUppercase={false} onChange={(e) => setDirectCustomerName(e.target.value.toUpperCase())} placeholder="Nama customer" />              </div>
+                <Input
+                  value={directCustomerName}
+                  disabled={directCustomerType === "member"}
+                  autoUppercase={false}
+                  onChange={(e) => setDirectCustomerName(e.target.value.toUpperCase())}
+                  placeholder={directCustomerType === "member" ? "Otomatis dari member" : "Nama customer"}
+                />
+                {directCustomerType === "member" && (
+                  <p className="text-[11px] text-muted-foreground">
+                    {directMemberLoading ? "Mencari member..." : directMember ? `Member: ${directMember.name}` : "Masukkan No. HP member untuk mengambil nama otomatis."}
+                  </p>
+                )}
+              </div>
               <div className="space-y-1 sm:col-span-2">
                 <label className="text-muted-foreground text-xs">No HP/WA {directCustomerType === "member" ? "(wajib)" : "(opsional)"}</label>
                 <Input value={directCustomerPhone} autoUppercase={false} onChange={(e) => setDirectCustomerPhone(e.target.value)} placeholder="08xxxxxxxxxx" />

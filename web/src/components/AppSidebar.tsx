@@ -123,7 +123,7 @@ const legacyMenuAliases: Record<string, string[]> = {
 function getAllowedTitles() {
   const user = getAuthUser();
   if (!user) return null;
-  if (user.level === "Owner" || user.level === "Admin") return null;
+  if (user.level === "Owner") return null;
   return new Set(user.menuAccess || []);
 }
 

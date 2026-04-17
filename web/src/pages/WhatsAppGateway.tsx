@@ -21,7 +21,7 @@ export default function WhatsAppGateway() {
       setStatus({
         status: qrRes.status,
         me: qrRes.me || "",
-        lastError: qrRes.lastError || "",
+        lastError: qrRes.status === "connected" ? "" : (qrRes.lastError || ""),
       });
       if (!qrRes.qrDataUrl && qrRes.lastErrorDetail) {
         // eslint-disable-next-line no-console
@@ -55,7 +55,7 @@ export default function WhatsAppGateway() {
     try {
       const qrRes = await api.waRefreshQr();
       setQr(qrRes.qrDataUrl || "");
-      setStatus({ status: qrRes.status, me: qrRes.me || "", lastError: qrRes.lastError || "" });
+      setStatus({ status: qrRes.status, me: qrRes.me || "", lastError: qrRes.status === "connected" ? "" : (qrRes.lastError || "") });
       toast({ title: "WhatsApp", description: qrRes.qrDataUrl ? "QR diperbarui." : "Gagal memuat QR." });
       if (!qrRes.qrDataUrl && qrRes.lastErrorDetail) {
         // eslint-disable-next-line no-console
@@ -120,7 +120,9 @@ export default function WhatsAppGateway() {
                 {status?.status === "connected" && status?.me ? (
                   <div className="mt-2 text-xs text-muted-foreground">Connected as: {status.me}</div>
                 ) : null}
-                {status?.lastError ? <div className="mt-2 text-xs text-destructive">Error: {status.lastError}</div> : null}
+                {status?.status !== "connected" && status?.lastError ? (
+                  <div className="mt-2 text-xs text-destructive">Error: {status.lastError}</div>
+                ) : null}
               </div>
               <Button
                 variant="outline"

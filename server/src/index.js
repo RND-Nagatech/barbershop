@@ -109,11 +109,15 @@ const apiGuard = (req, res, next) => {
     (method === "POST" && path === "/auth/login") ||
     (method === "GET" && path === "/queue/today") ||
     (method === "GET" && path === "/public/branch") ||
+    (method === "GET" && path === "/public/member-lookup") ||
+    (method === "GET" && path === "/public/products-lite") ||
     (method === "GET" && path.startsWith("/public/ticket/")) ||
     (method === "GET" && path.startsWith("/public/receipt/")) ||
     (method === "GET" && path === "/branches/by-domain") ||
     (method === "GET" && path === "/services") ||
+    (method === "GET" && path === "/layanan") ||
     (method === "GET" && path === "/bookings/public") ||
+    (method === "GET" && path === "/bookings/queue-preview") ||
     (method === "POST" && path === "/bookings");
 
   if (isPublic) return next();
@@ -213,7 +217,7 @@ const userSchema = new mongoose.Schema(
 const customerSchema = new mongoose.Schema(
   {
     phone: { type: String, trim: true, default: null },
-    name: { type: String, trim: true, default: "" },
+    name: { type: String, trim: true, uppercase: true, default: "" },
     isMember: { type: Boolean, default: false },
     // Legacy: previously stored as rupiah, now replaced by points.
     loyaltyBalanceRp: { type: Number, default: 0, min: 0 },
@@ -373,9 +377,12 @@ expenseSchema.index({ ymd: 1 });
 const cashMovementSchema = new mongoose.Schema(
   {
     tgl_sistem: { type: String, required: true, trim: true },
-    arah: { type: String, enum: ["in", "out"], required: true },
+    arah: { type: String, enum: ["IN", "OUT"], required: true },
     jumlah: { type: Number, required: true, min: 1 },
     deskripsi: { type: String, required: true, trim: true },
+    kategori: { type: String, required: true, trim: true },
+    jenis_trx: { type: String, enum: ["LAYANAN", "KAS", "PRODUK"], required: true },
+    status: { type: String, enum: ["VALID", "VOID"], required: true, default: "VALID" },
     dibuat_oleh: { type: String, trim: true, default: "" },
   },
   { timestamps: true },
@@ -480,7 +487,7 @@ const normalizePhone = (value) => {
 const upsertCustomerByPhone = async ({ phone, name, forceMember, session } = {}) => {
   const normalizedPhone = normalizePhone(phone || "");
   if (!normalizedPhone) return null;
-  const safeName = String(name || "").trim();
+  const safeName = String(name || "").trim().toUpperCase();
 
   const update = {
     $setOnInsert: { phone: normalizedPhone, isMember: false },
@@ -605,6 +612,25 @@ const isTransactionNotSupported = (err) => {
 app.get("/api/health", (_, res) => {
   res.json({ ok: true, uptime: process.uptime() });
 });
+
+app.get(
+  "/api/public/member-lookup",
+  asyncHandler(async (req, res) => {
+    const phone = normalizePhone(String(req.query.phone || ""));
+    if (!phone) return res.json({ found: false, name: "" });
+    const customer = await Customer.findOne({ phone, isMember: true }).select("name phone").lean();
+    if (!customer) return res.json({ found: false, name: "" });
+    res.json({ found: true, name: customer.name || "" });
+  }),
+);
+
+app.get(
+  "/api/public/products-lite",
+  asyncHandler(async (_req, res) => {
+    const rows = await Product.find().select("kode nama").sort({ nama: 1 }).lean();
+    res.json(rows.map((p) => ({ kode: p.kode, nama: p.nama })));
+  }),
+);
 
 
 app.post(
@@ -1066,7 +1092,16 @@ app.post(
 
     const ymd = formatJakartaYmd();
     const createdBy = req.user?.username ? String(req.user.username) : "";
-    const created = await CashMovement.create({ tgl_sistem: ymd, arah: "in", jumlah: amount, deskripsi: description, dibuat_oleh: createdBy });
+    const created = await CashMovement.create({
+      tgl_sistem: ymd,
+      arah: "IN",
+      jumlah: amount,
+      deskripsi: description,
+      kategori: "TAMBAH KAS",
+      jenis_trx: "KAS",
+      status: "VALID",
+      dibuat_oleh: createdBy,
+    });
     res.status(201).json({
       id: String(created._id),
       ymd: created.tgl_sistem,
@@ -1090,7 +1125,16 @@ app.post(
 
     const ymd = formatJakartaYmd();
     const createdBy = req.user?.username ? String(req.user.username) : "";
-    const created = await CashMovement.create({ tgl_sistem: ymd, arah: "out", jumlah: amount, deskripsi: description, dibuat_oleh: createdBy });
+    const created = await CashMovement.create({
+      tgl_sistem: ymd,
+      arah: "OUT",
+      jumlah: amount,
+      deskripsi: description,
+      kategori: "AMBIL KAS",
+      jenis_trx: "KAS",
+      status: "VALID",
+      dibuat_oleh: createdBy,
+    });
     res.status(201).json({
       id: String(created._id),
       ymd: created.tgl_sistem,
@@ -1116,14 +1160,15 @@ app.get(
       query.tgl_sistem = { $lte: req.query.to };
     }
     const direction = String(req.query.direction || "").trim();
-    if (direction === "in" || direction === "out") query.arah = direction;
+    if (direction === "in") query.arah = { $in: ["IN", "in"] };
+    if (direction === "out") query.arah = { $in: ["OUT", "out"] };
 
     const rows = await CashMovement.find(query).sort({ createdAt: -1 }).limit(200).lean();
     res.json(
       rows.map((r) => ({
         id: String(r._id),
         ymd: r.tgl_sistem,
-        direction: r.arah,
+        direction: String(r.arah || "").toUpperCase() === "OUT" ? "out" : "in",
         amount: r.jumlah,
         description: r.deskripsi,
         createdBy: r.dibuat_oleh || "",
@@ -1322,6 +1367,22 @@ app.post(
       await session.endSession();
     }
 
+    // Simpan keuangan (tt_keuangan) setelah transaksi sukses
+    try {
+      await CashMovement.create({
+        tgl_sistem: paidYmd,
+        arah: "IN",
+        jumlah: total,
+        deskripsi: saleCode,
+        kategori: "TRANSAKSI",
+        jenis_trx: "PRODUK",
+        status: "VALID",
+        dibuat_oleh: req.user?.username ? String(req.user.username) : "",
+      });
+    } catch (err) {
+      console.warn("Gagal simpan keuangan (tt_keuangan) direct sale:", err?.message || err);
+    }
+
     res.status(201).json({
       id: String(createdSale._id),
       saleCode: createdSale.kode_transaksi || saleCode,
@@ -1448,6 +1509,7 @@ app.post(
     const productItems = (sale.item || []).filter((i) => i.type === "product");
     const shouldRollbackBooking = Boolean(sale.id_booking) && String(sale.sumber || "tt_booking") === "tt_booking";
 
+
     const session = await mongoose.startSession({ defaultTransactionOptions: { readPreference: "primary" } });
     try {
       await session.withTransaction(async () => {
@@ -1479,6 +1541,22 @@ app.post(
           }
         }
 
+        // Tambahkan dokumen VOID ke tt_keuangan
+        await CashMovement.create([
+          {
+            tgl_sistem: ymd,
+            arah: "OUT",
+            jumlah: sale.total,
+            deskripsi: sale.kode_transaksi || sale.kode_booking || "",
+            kategori: "VOID",
+            jenis_trx: "LAYANAN",
+            status: "VOID",
+            dibuat_oleh: voidedBy,
+            createdAt: voidedAt,
+            updatedAt: voidedAt,
+          },
+        ], { session, ordered: true });
+
         if (shouldRollbackBooking) {
           await Booking.updateOne(
             { _id: sale.id_booking },
@@ -1508,6 +1586,20 @@ app.post(
           await StockMovement.create(buildStockMovementDoc({ product: updatedProduct, delta: qty, reason: "void", refSaleId: sale._id, refBookingCode: sale.kode_booking || "", ymd }));
         }
       }
+
+      // Tambahkan dokumen VOID ke tt_keuangan (tanpa session)
+      await CashMovement.create({
+        tgl_sistem: ymd,
+        arah: "OUT",
+        jumlah: sale.total,
+        deskripsi: sale.kode_transaksi || sale.kode_booking || "",
+        kategori: "VOID",
+        jenis_trx: "LAYANAN",
+        status: "VOID",
+        dibuat_oleh: voidedBy,
+        createdAt: voidedAt,
+        updatedAt: voidedAt,
+      });
 
       if (shouldRollbackBooking) {
         await Booking.updateOne({ _id: sale.id_booking }, { $set: { status_bayar: "Unpaid", tgl_bayar: null, tgl_byr: "" } });
@@ -1743,7 +1835,7 @@ app.post(
   asyncHandler(async (req, res) => {
     const isMember = Boolean(req.body?.isMember);
     const phone = normalizePhone(req.body?.phone);
-    const name = String(req.body?.name || "").trim();
+    const name = String(req.body?.name || "").trim().toUpperCase();
     if (!name) return res.status(400).json({ message: "Nama wajib diisi" });
     if (isMember && !phone) return res.status(400).json({ message: "No HP tidak valid (wajib untuk member)" });
 
@@ -1777,7 +1869,7 @@ app.post(
     // same as /api/customer
     const isMember = Boolean(req.body?.isMember);
     const phone = normalizePhone(req.body?.phone);
-    const name = String(req.body?.name || "").trim();
+    const name = String(req.body?.name || "").trim().toUpperCase();
     if (!name) return res.status(400).json({ message: "Nama wajib diisi" });
     if (isMember && !phone) return res.status(400).json({ message: "No HP tidak valid (wajib untuk member)" });
 
@@ -1815,7 +1907,7 @@ app.put(
     const phone = normalizePhone(req.body?.phone);
     const payload = {
       phone: phone || null,
-      name: String(req.body?.name || "").trim(),
+      name: String(req.body?.name || "").trim().toUpperCase(),
       isMember,
     };
     if (payload.isMember && !payload.phone) return res.status(400).json({ message: "No HP tidak valid (wajib untuk member)" });
@@ -1845,7 +1937,7 @@ app.put(
     const phone = normalizePhone(req.body?.phone);
     const payload = {
       phone: phone || null,
-      name: String(req.body?.name || "").trim(),
+      name: String(req.body?.name || "").trim().toUpperCase(),
       isMember,
     };
     if (payload.isMember && !payload.phone) return res.status(400).json({ message: "No HP tidak valid (wajib untuk member)" });
@@ -1861,6 +1953,49 @@ app.put(
       visitCount: updated.visitCount || 0,
       lastVisitAt: updated.lastVisitAt,
     });
+  }),
+);
+
+app.delete(
+  "/api/customer/:id",
+  requireLevels("Owner", "Admin"),
+  asyncHandler(async (req, res) => {
+    const _id = toObjectId(req.params.id);
+    if (!_id) return res.status(400).json({ message: "ID tidak valid" });
+
+    const [saleCount, bookingCount] = await Promise.all([
+      Sale.countDocuments({ id_pelanggan: _id }),
+      Booking.countDocuments({ id_pelanggan: _id }),
+    ]);
+    if (saleCount > 0 || bookingCount > 0) {
+      return res.status(409).json({ message: "Customer sudah punya transaksi/booking, tidak bisa dihapus." });
+    }
+
+    const deleted = await Customer.findByIdAndDelete(_id).lean();
+    if (!deleted) return res.status(404).json({ message: "Data tidak ditemukan" });
+    return res.status(204).send();
+  }),
+);
+
+app.delete(
+  "/api/customers/:id",
+  requireLevels("Owner", "Admin"),
+  asyncHandler(async (req, res) => {
+    req.url = `/api/customer/${req.params.id}`;
+    const _id = toObjectId(req.params.id);
+    if (!_id) return res.status(400).json({ message: "ID tidak valid" });
+
+    const [saleCount, bookingCount] = await Promise.all([
+      Sale.countDocuments({ id_pelanggan: _id }),
+      Booking.countDocuments({ id_pelanggan: _id }),
+    ]);
+    if (saleCount > 0 || bookingCount > 0) {
+      return res.status(409).json({ message: "Customer sudah punya transaksi/booking, tidak bisa dihapus." });
+    }
+
+    const deleted = await Customer.findByIdAndDelete(_id).lean();
+    if (!deleted) return res.status(404).json({ message: "Data tidak ditemukan" });
+    return res.status(204).send();
   }),
 );
 
@@ -2912,9 +3047,12 @@ app.post(
     try {
       await CashMovement.create({
         tgl_sistem: paidYmd,
-        arah: "in",
+        arah: "IN",
         jumlah: total,
-        deskripsi: `Pembayaran booking ${updated.kode_booking || updated.bookingCode || ""}`,
+        deskripsi: salePayload.kode_transaksi || updated.kode_booking || updated.bookingCode || "",
+        kategori: "TRANSAKSI",
+        jenis_trx: "LAYANAN",
+        status: "VALID",
         dibuat_oleh: req.user?.username ? String(req.user.username) : "",
       });
     } catch (err) {
@@ -3258,127 +3396,98 @@ app.get(
   requireLevels("Owner", "Admin", "Kasir"),
   asyncHandler(async (req, res) => {
     const view = String(req.query.view || "recap").toLowerCase(); // recap|detail
-    const jenis = String(req.query.jenis || "all").toLowerCase(); // all|service|product|cash_in|cash_out
-    const kode = String(req.query.kode || "").trim();
+    const jenisTrx = String(req.query.jenisTrx || "all").toLowerCase(); // all|layanan|produk|kas
+    const kategori = String(req.query.kategori || "all").trim();
 
     const from = String(req.query.from || "").trim();
     const to = String(req.query.to || "").trim();
 
-    const saleMatch = { status: { $in: ["Paid", "Void"] } };
-    if (from && to) saleMatch.tgl_byr = { $gte: from, $lte: to };
-    else if (from) saleMatch.tgl_byr = { $gte: from };
-    else if (to) saleMatch.tgl_byr = { $lte: to };
+    const match = {};
+    if (from && to) match.tgl_sistem = { $gte: from, $lte: to };
+    else if (from) match.tgl_sistem = { $gte: from };
+    else if (to) match.tgl_sistem = { $lte: to };
 
-    if (jenis === "service") saleMatch.tipe = "service";
-    if (jenis === "product") saleMatch.tipe = "product";
-    if (jenis === "service" || jenis === "product") {
-      if (kode) saleMatch.kode = kode;
-    }
-    if (jenis === "cash_in" || jenis === "cash_out") {
-      saleMatch.tipe = "__none__";
-    }
+    if (kategori && kategori !== "all") match.kategori = kategori;
+    if (jenisTrx === "layanan") match.jenis_trx = "LAYANAN";
+    if (jenisTrx === "produk") match.jenis_trx = "PRODUK";
+    if (jenisTrx === "kas") match.jenis_trx = "KAS";
 
-    const cashMatch = {};
-    if (from && to) cashMatch.tgl_sistem = { $gte: from, $lte: to };
-    else if (from) cashMatch.tgl_sistem = { $gte: from };
-    else if (to) cashMatch.tgl_sistem = { $lte: to };
-    if (jenis === "cash_in") cashMatch.arah = "in";
-    if (jenis === "cash_out") cashMatch.arah = "out";
-    if (jenis === "service" || jenis === "product") cashMatch.arah = "__none__";
-
-    const basePipeline = [
-      { $match: saleMatch },
-      {
-        $project: {
-          tipe: { $cond: [{ $eq: ["$tipe", "product"] }, "Produk", "Layanan"] },
-          kode: "$kode",
-          nama: "$nama",
-          jumlah: "$qty",
-          jumlahIn: { $cond: [{ $eq: ["$status", "Paid"] }, "$subtotal", 0] },
-          jumlahOut: { $cond: [{ $eq: ["$status", "Void"] }, "$subtotal", 0] },
-          deskripsi: {
-            $concat: [
-              { $ifNull: ["$kode_transaksi", ""] },
-              {
-                $cond: [
-                  { $gt: [{ $strLenCP: { $ifNull: ["$kode_transaksi", ""] } }, 0] },
-                  "",
-                  { $ifNull: ["$kode_booking", ""] },
-                ],
-              },
-              { $cond: [{ $eq: ["$status", "Void"] }, " (VOID)", ""] },
-            ],
-          },
-          sortYmd: "$tgl_byr",
-          sortAt: "$tgl_bayar",
-        },
-      },
-      {
-        $unionWith: {
-          coll: CashMovement.collection.name,
-          pipeline: [
-            { $match: cashMatch },
-            {
-              $project: {
-                tipe: { $cond: [{ $eq: ["$arah", "in"] }, "Tambah Kas", "Ambil Kas"] },
-                kode: "-",
-                nama: "Kas",
-                jumlah: 1,
-                jumlahIn: { $cond: [{ $eq: ["$arah", "in"] }, "$jumlah", 0] },
-                jumlahOut: { $cond: [{ $eq: ["$arah", "out"] }, "$jumlah", 0] },
-                deskripsi: "$deskripsi",
-                sortYmd: "$tgl_sistem",
-                sortAt: "$createdAt",
-              },
-            },
-          ],
-        },
-      },
-    ];
+    const baseProject = {
+      kategori: "$kategori",
+      jenisTrx: "$jenis_trx",
+      uangMasuk: { $cond: [{ $eq: [{ $toUpper: "$arah" }, "IN"] }, "$jumlah", 0] },
+      uangKeluar: { $cond: [{ $eq: [{ $toUpper: "$arah" }, "OUT"] }, "$jumlah", 0] },
+      deskripsi: "$deskripsi",
+      sortYmd: "$tgl_sistem",
+      sortAt: "$createdAt",
+    };
 
     if (view === "detail") {
-      const rows = await SaleLine.aggregate([
-        ...basePipeline,
-        { $sort: { sortYmd: 1, sortAt: 1, tipe: 1, kode: 1 } },
-        { $limit: 5000 },
+      const rows = await CashMovement.aggregate([
+        { $match: match },
+        { $project: baseProject },
+        { $sort: { sortYmd: 1, sortAt: 1, kategori: 1, jenisTrx: 1 } },
+        { $limit: 10000 },
         { $project: { sortYmd: 0, sortAt: 0 } },
       ]);
       return res.json(
         rows.map((r) => ({
-          tipe: r.tipe,
-          kode: r.kode,
-          nama: r.nama,
-          jumlah: Number(r.jumlah) || 0,
-          jumlahIn: Number(r.jumlahIn) || 0,
-          jumlahOut: Number(r.jumlahOut) || 0,
+          kategori: String(r.kategori || ""),
+          jenisTrx: String(r.jenisTrx || ""),
           deskripsi: String(r.deskripsi || ""),
+          uangMasuk: Number(r.uangMasuk) || 0,
+          uangKeluar: Number(r.uangKeluar) || 0,
         })),
       );
     }
 
-    const rows = await SaleLine.aggregate([
-      ...basePipeline,
+    const rows = await CashMovement.aggregate([
+      { $match: match },
+      { $project: baseProject },
       {
         $group: {
-          _id: { tipe: "$tipe", kode: "$kode", nama: "$nama" },
-          jumlah: { $sum: "$jumlah" },
-          jumlahIn: { $sum: "$jumlahIn" },
-          jumlahOut: { $sum: "$jumlahOut" },
+          _id: { kategori: "$kategori", jenisTrx: "$jenisTrx" },
+          uangMasuk: { $sum: "$uangMasuk" },
+          uangKeluar: { $sum: "$uangKeluar" },
         },
       },
-      { $sort: { "_id.tipe": 1, "_id.kode": 1, "_id.nama": 1 } },
+      { $sort: { "_id.kategori": 1, "_id.jenisTrx": 1 } },
     ]);
 
     return res.json(
       rows.map((r) => ({
-        tipe: r._id.tipe,
-        kode: r._id.kode,
-        nama: r._id.nama,
-        jumlah: Number(r.jumlah) || 0,
-        jumlahIn: Number(r.jumlahIn) || 0,
-        jumlahOut: Number(r.jumlahOut) || 0,
+        kategori: String(r._id.kategori || ""),
+        jenisTrx: String(r._id.jenisTrx || ""),
+        uangMasuk: Number(r.uangMasuk) || 0,
+        uangKeluar: Number(r.uangKeluar) || 0,
       })),
     );
+  }),
+);
+
+app.get(
+  "/api/reports/finance/categories",
+  requireLevels("Owner", "Admin", "Kasir"),
+  asyncHandler(async (req, res) => {
+    const jenisTrx = String(req.query.jenisTrx || "all").toLowerCase(); // all|layanan|produk|kas
+    const from = String(req.query.from || "").trim();
+    const to = String(req.query.to || "").trim();
+
+    const match = {};
+    if (from && to) match.tgl_sistem = { $gte: from, $lte: to };
+    else if (from) match.tgl_sistem = { $gte: from };
+    else if (to) match.tgl_sistem = { $lte: to };
+    if (jenisTrx === "layanan") match.jenis_trx = "LAYANAN";
+    if (jenisTrx === "produk") match.jenis_trx = "PRODUK";
+    if (jenisTrx === "kas") match.jenis_trx = "KAS";
+
+    const rows = await CashMovement.aggregate([
+      { $match: match },
+      { $group: { _id: "$kategori" } },
+      { $sort: { _id: 1 } },
+      { $limit: 500 },
+    ]);
+    res.json(rows.map((r) => String(r._id || "")).filter(Boolean));
   }),
 );
 

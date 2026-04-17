@@ -7,7 +7,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "@/hooks/use-toast";
-import { api, type Employee, type Product, type Service } from "@/lib/api";
+import { api, type CustomerItem, type Employee, type Product, type Service } from "@/lib/api";
+import { normalizePhone } from "@/lib/phone";
 
 export default function InputBooking() {
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -18,6 +19,9 @@ export default function InputBooking() {
     noHp: "",
     pegawai: "",
   });
+  const [customerType, setCustomerType] = useState<"regular" | "member">("regular");
+  const [member, setMember] = useState<CustomerItem | null>(null);
+  const [memberLoading, setMemberLoading] = useState(false);
   const [selectedLayanan, setSelectedLayanan] = useState<string[]>([]);
   const [antrian, setAntrian] = useState(0);
 
@@ -61,8 +65,50 @@ export default function InputBooking() {
     [layananList, selectedLayanan],
   );
 
+  useEffect(() => {
+    if (customerType !== "member") {
+      setMember(null);
+      setMemberLoading(false);
+      return;
+    }
+
+    const phone = normalizePhone(form.noHp);
+    if (!phone) {
+      setMember(null);
+      setMemberLoading(false);
+      setForm((prev) => ({ ...prev, namaCustomer: "" }));
+      return;
+    }
+
+    let cancelled = false;
+    setMemberLoading(true);
+    const t = window.setTimeout(async () => {
+      try {
+        const rows = await api.getCustomers({ q: phone, memberOnly: true });
+        if (cancelled) return;
+        const found = rows.find((r) => r.phone === phone) || null;
+        setMember(found);
+        setForm((prev) => ({ ...prev, namaCustomer: found?.name || "" }));
+      } catch {
+        if (cancelled) return;
+        setMember(null);
+      } finally {
+        if (!cancelled) setMemberLoading(false);
+      }
+    }, 350);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t);
+    };
+  }, [customerType, form.noHp]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (customerType === "member" && (!member || !member.isMember)) {
+      toast({ title: "Member tidak ditemukan", description: "Pastikan No. HP terdaftar sebagai member.", variant: "destructive" });
+      return;
+    }
     if (!form.namaCustomer || !selectedLayanan.length) {
       toast({ title: "Error", description: "Lengkapi semua data booking", variant: "destructive" });
       return;
@@ -83,6 +129,8 @@ export default function InputBooking() {
       toast({ title: "Berhasil", description: `Booking ${created.bookingCode} untuk ${form.namaCustomer} berhasil disimpan` });
       setAntrian((await api.getQueuePreview()).nextAntrian);
       setForm({ namaCustomer: "", noHp: "", pegawai: "" });
+      setCustomerType("regular");
+      setMember(null);
       setSelectedLayanan([]);
     } catch (error) {
       toast({
@@ -108,10 +156,41 @@ export default function InputBooking() {
           <Card className="border-border/50">
             <CardContent className="p-5">
               <form onSubmit={handleSubmit} className="space-y-5">
+                <div className="space-y-2">
+                  <Label>Tipe Customer</Label>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant={customerType === "regular" ? "default" : "outline"}
+                      className={customerType === "regular" ? "bg-accent text-accent-foreground hover:bg-accent/90" : ""}
+                      onClick={() => setCustomerType("regular")}
+                    >
+                      Reguler
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={customerType === "member" ? "default" : "outline"}
+                      className={customerType === "member" ? "bg-accent text-accent-foreground hover:bg-accent/90" : ""}
+                      onClick={() => setCustomerType("member")}
+                    >
+                      Member
+                    </Button>
+                  </div>
+                  {customerType === "member" && (
+                    <p className="text-xs text-muted-foreground">
+                      {memberLoading ? "Mencari member..." : member ? `Member: ${member.name}` : "Masukkan No. HP member untuk mengambil nama otomatis."}
+                    </p>
+                  )}
+                </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>Nama Customer</Label>
-                    <Input value={form.namaCustomer} onChange={(e) => setForm({ ...form, namaCustomer: e.target.value })} placeholder="Nama lengkap" />
+                    <Input
+                      value={form.namaCustomer}
+                      disabled={customerType === "member"}
+                      onChange={(e) => setForm({ ...form, namaCustomer: e.target.value })}
+                      placeholder={customerType === "member" ? "Otomatis dari member" : "Nama lengkap"}
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label>No. HP/WA</Label>

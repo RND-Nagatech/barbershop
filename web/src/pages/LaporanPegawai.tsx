@@ -8,6 +8,7 @@ import { api, type EmployeeReportRow } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
 import { formatLocalYmd } from "@/lib/date";
 import { Input } from "@/components/ui/input";
+import { buildPeriodeText, getActiveBranchName } from "@/lib/reportHeader";
 
 const formatRp = (n: number) =>
   new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(n);
@@ -17,6 +18,11 @@ export default function LaporanPegawai() {
   const [data, setData] = useState<EmployeeReportRow[]>([]);
   const [from, setFrom] = useState(getToday());
   const [to, setTo] = useState(getToday());
+  const [branchName, setBranchName] = useState("");
+
+  useEffect(() => {
+    void getActiveBranchName().then(setBranchName);
+  }, []);
 
   useEffect(() => {
     const load = async () => {
@@ -42,8 +48,10 @@ export default function LaporanPegawai() {
   const headers = ["Kode", "Nama Pegawai", "Layanan Selesai", "Total (Rp)", "Komisi"];
   const rows = data.map((d) => [d.kode, d.nama, d.layananSelesai, formatRp(d.totalRp), formatRp(d.komisi)]);
 
-  const handleExcel = () => exportToExcel("Laporan Pegawai", headers, rows, "laporan_pegawai");
-  const handlePDF = () => exportToPDF("Laporan Pegawai", headers, rows, "laporan_pegawai");
+  const periodText = buildPeriodeText(from, to, getToday());
+  const meta = { periodText, branchName };
+  const handleExcel = () => exportToExcel("Laporan Pegawai", headers, rows, "laporan_pegawai", undefined, meta);
+  const handlePDF = () => exportToPDF("Laporan Pegawai", headers, rows, "laporan_pegawai", undefined, meta);
 
   return (
     <div>

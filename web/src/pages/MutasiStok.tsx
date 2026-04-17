@@ -9,6 +9,7 @@ import { FileSpreadsheet, FileText } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { exportToExcel, exportToPDF } from "@/lib/exportUtils";
 import { Input } from "@/components/ui/input";
+import { buildPeriodeText, getActiveBranchName } from "@/lib/reportHeader";
 
 export default function MutasiStok() {
   const getToday = () => formatLocalYmd(new Date()) || "";
@@ -18,6 +19,11 @@ export default function MutasiStok() {
   const [products, setProducts] = useState<Product[]>([]);
   const [data, setData] = useState<StockMovementItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [branchName, setBranchName] = useState("");
+
+  useEffect(() => {
+    void getActiveBranchName().then(setBranchName);
+  }, []);
 
   const selectedKode = kode !== "all" ? kode : "";
 
@@ -62,8 +68,10 @@ export default function MutasiStok() {
     [data],
   );
 
-  const handleExcel = () => exportToExcel("Mutasi Stok", exportHeaders, exportRows, "mutasi_stok");
-  const handlePDF = () => exportToPDF("Mutasi Stok", exportHeaders, exportRows, "mutasi_stok");
+  const periodText = buildPeriodeText(from, to, getToday());
+  const meta = { periodText, branchName };
+  const handleExcel = () => exportToExcel("Mutasi Stok", exportHeaders, exportRows, "mutasi_stok", undefined, meta);
+  const handlePDF = () => exportToPDF("Mutasi Stok", exportHeaders, exportRows, "mutasi_stok", undefined, meta);
 
   return (
     <div>

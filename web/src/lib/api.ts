@@ -169,15 +169,20 @@ export interface DashboardPayload {
   }>;
 }
 
-export interface FinanceRow {
-  kode: string;
-  nama: string;
-  tipe?: "Layanan" | "Produk" | "Tambah Kas" | "Ambil Kas";
-  jumlah: number;
-  jumlahIn: number;
-  jumlahOut: number;
-  deskripsi?: string;
+export type FinanceJenisTrx = "LAYANAN" | "KAS" | "PRODUK";
+
+export interface FinanceRowRecap {
+  kategori: string;
+  jenisTrx: FinanceJenisTrx | string;
+  uangMasuk: number;
+  uangKeluar: number;
 }
+
+export interface FinanceRowDetail extends FinanceRowRecap {
+  deskripsi: string;
+}
+
+export type FinanceRow = FinanceRowRecap | FinanceRowDetail;
 
 export interface EmployeeReportRow {
   kode: string;
@@ -371,6 +376,8 @@ export interface CustomerItem {
   createdAt: string;
 }
 
+export type PublicProductsLite = Array<{ kode: string; nama: string }>;
+
 export const api = {
   login: (username: string, password: string) => request<{ user: UserItem; token: string }>("/auth/login", "POST", { username, password }),
 
@@ -494,6 +501,7 @@ export const api = {
   createCustomer: (payload: { phone?: string; name: string; isMember: boolean }) => request<CustomerItem>("/customer", "POST", payload),
   updateCustomer: (id: string, payload: { phone?: string; name: string; isMember: boolean }) =>
     request<CustomerItem>(`/customer/${id}`, "PUT", payload),
+  deleteCustomer: (id: string) => request<void>(`/customer/${id}`, "DELETE"),
   getCustomerSales: (id: string) =>
     request<Array<{ id: string; bookingCode: string; total: number; status: "Paid" | "Void"; paidAt: string; paidYmd: string }>>(
       `/customer/${id}/sales`,
@@ -539,16 +547,38 @@ export const api = {
   completeBooking: (id: string) => request(`/bookings/${id}/complete`, "PATCH"),
 
   getDashboard: () => request<DashboardPayload>("/dashboard"),
-  getFinanceReport: (params?: { from?: string; to?: string; view?: "recap" | "detail"; jenis?: "all" | "service" | "product" | "cash_in" | "cash_out"; kode?: string }) => {
+  getFinanceReport: (params?: {
+    from?: string;
+    to?: string;
+    view?: "recap" | "detail";
+    jenisTrx?: "all" | "layanan" | "produk" | "kas";
+    kategori?: string;
+  }) => {
     const query = new URLSearchParams();
     if (params?.from) query.set("from", params.from);
     if (params?.to) query.set("to", params.to);
     if (params?.view) query.set("view", params.view);
-    if (params?.jenis) query.set("jenis", params.jenis);
-    if (params?.kode) query.set("kode", params.kode);
+    if (params?.jenisTrx) query.set("jenisTrx", params.jenisTrx);
+    if (params?.kategori) query.set("kategori", params.kategori);
     const suffix = query.toString() ? `?${query.toString()}` : "";
     return request<FinanceRow[]>(`/reports/finance${suffix}`);
   },
+  getFinanceCategories: (params?: { from?: string; to?: string; jenisTrx?: "all" | "layanan" | "produk" | "kas" }) => {
+    const query = new URLSearchParams();
+    if (params?.from) query.set("from", params.from);
+    if (params?.to) query.set("to", params.to);
+    if (params?.jenisTrx) query.set("jenisTrx", params.jenisTrx);
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return request<string[]>(`/reports/finance/categories${suffix}`);
+  },
+
+  publicMemberLookup: (phone: string) => {
+    const query = new URLSearchParams();
+    query.set("phone", phone);
+    return request<{ found: boolean; name: string }>(`/public/member-lookup?${query.toString()}`);
+  },
+
+  getPublicProductsLite: () => request<PublicProductsLite>(`/public/products-lite`),
   getEmployeeReport: (params?: { from?: string; to?: string }) => {
     const query = new URLSearchParams();
     if (params?.from) query.set("from", params.from);

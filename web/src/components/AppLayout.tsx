@@ -16,7 +16,7 @@ export function AppLayout() {
   useEffect(() => {
     const user = getAuthUser();
     if (!user) return;
-    if (user.level === "Owner" || user.level === "Admin") return;
+    if (user.level === "Owner") return;
 
     const allowed = new Set(user.menuAccess || []);
     const path = location.pathname;

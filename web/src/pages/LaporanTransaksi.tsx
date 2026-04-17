@@ -8,10 +8,11 @@ import { api, type TransactionDetailRow, type TransactionItemsGroupedResponse } 
 import { toast } from "@/hooks/use-toast";
 import { formatLocalYmd } from "@/lib/date";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import * as XLSX from "xlsx";
+import * as XLSX from "xlsx-js-style";
 import { saveAs } from "file-saver";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import { buildPeriodeText, getActiveBranchName } from "@/lib/reportHeader";
 
 const formatNumberId = (n: number) => new Intl.NumberFormat("id-ID").format(Number(n) || 0);
 const parseLocalYmd = (ymd: string) => {
@@ -31,6 +32,7 @@ export default function LaporanTransaksi() {
   const [to, setTo] = useState<Date | undefined>(new Date(today));
   const [query, setQuery] = useState("");
   const [viewMode, setViewMode] = useState<ViewMode>("rekap");
+  const [branchName, setBranchName] = useState("");
 
   const [loading, setLoading] = useState(true);
   const [loadingGroups, setLoadingGroups] = useState(true);
@@ -39,6 +41,11 @@ export default function LaporanTransaksi() {
 
   const fromYmd = formatLocalYmd(from);
   const toYmd = formatLocalYmd(to);
+  const periodText = buildPeriodeText(fromYmd, toYmd, formatLocalYmd(new Date()) || "");
+
+  useEffect(() => {
+    void getActiveBranchName().then(setBranchName);
+  }, []);
 
   const titleRange = useMemo(() => {
     if (fromYmd && toYmd && fromYmd === toYmd) return `Tanggal: ${fromYmd}`;
@@ -47,8 +54,6 @@ export default function LaporanTransaksi() {
     if (toYmd) return `Periode: ... s/d ${toYmd}`;
     return "Periode: -";
   }, [fromYmd, toYmd]);
-
-  const statusLabel = (status: "Paid" | "Void") => (status === "Paid" ? "POSTED" : "VOID");
 
   const detailSummary = useMemo(() => {
     const count = details.length;
@@ -130,13 +135,21 @@ export default function LaporanTransaksi() {
     // - One table per view mode
     // - Grouping/subtotal/total rows are embedded inside the table (colSpan-like via merges)
 
-    // Title (as shown above the table)
-    wsData.push([titleRange, "", "", "", "", ""]);
-    merges.push({ s: { r: 0, c: 0 }, e: { r: 0, c: 5 } });
-    wsData.push(["", "", "", "", "", ""]);
+    const headerCols = viewMode === "rekap" ? 5 : 6;
+
+    // Centered meta (shared)
+    wsData.push([String("LAPORAN TRANSAKSI"), ...Array(Math.max(0, headerCols - 1)).fill("")]);
+    merges.push({ s: { r: 0, c: 0 }, e: { r: 0, c: headerCols - 1 } });
+    wsData.push([periodText, ...Array(Math.max(0, headerCols - 1)).fill("")]);
+    merges.push({ s: { r: 1, c: 0 }, e: { r: 1, c: headerCols - 1 } });
+    if (branchName) {
+      wsData.push([String(branchName).toUpperCase(), ...Array(Math.max(0, headerCols - 1)).fill("")]);
+      merges.push({ s: { r: 2, c: 0 }, e: { r: 2, c: headerCols - 1 } });
+    }
+    wsData.push(Array(headerCols).fill(""));
 
     if (viewMode === "rekap") {
-      wsData.push(["No", "Kode Transaksi", "Customer", "Barber", "Jumlah Rp", "Status"]);
+      wsData.push(["No", "Kode Transaksi", "Customer", "Barber", "Jumlah Rp"]);
       details.forEach((d, idx) => {
         wsData.push([
           idx + 1,
@@ -144,13 +157,12 @@ export default function LaporanTransaksi() {
           d.customerName || "-",
           d.barber || "-",
           formatNumberId(d.total),
-          statusLabel(d.status),
         ]);
       });
 
       // Footer row mirrors the <tfoot> in the table
       const footerRowIndex = wsData.length;
-      wsData.push([`Total ${formatNumberId(detailSummary.count)}`, "", "", "", formatNumberId(detailSummary.totalRp), ""]);
+      wsData.push([`Total ${formatNumberId(detailSummary.count)}`, "", "", "", formatNumberId(detailSummary.totalRp)]);
       merges.push({ s: { r: footerRowIndex, c: 0 }, e: { r: footerRowIndex, c: 1 } });
       merges.push({ s: { r: footerRowIndex, c: 2 }, e: { r: footerRowIndex, c: 3 } });
     } else {
@@ -164,13 +176,7 @@ export default function LaporanTransaksi() {
         wsData.push([code, "", "", "", "", ""]);
         merges.push({ s: { r: groupRowIndex, c: 0 }, e: { r: groupRowIndex, c: 5 } });
 
-        let subQty = 0;
-        let subHarga = 0;
-        let subSubtotal = 0;
         (g.items || []).forEach((it, idx) => {
-          subQty += Number(it.qty) || 0;
-          subHarga += Number(it.harga) || 0;
-          subSubtotal += Number(it.subtotal) || 0;
           wsData.push([
             idx + 1,
             it.type === "service" ? "SERVICE" : "PRODUCT",
@@ -180,11 +186,6 @@ export default function LaporanTransaksi() {
             formatNumberId(it.subtotal),
           ]);
         });
-
-        // Subtotal row (SUB TOTAL spans first 3 cols)
-        const subRowIndex = wsData.length;
-        wsData.push(["SUB TOTAL", "", "", formatNumberId(subQty), formatNumberId(subHarga), formatNumberId(subSubtotal)]);
-        merges.push({ s: { r: subRowIndex, c: 0 }, e: { r: subRowIndex, c: 2 } });
       }
 
       // Total row (TOTAL spans first 3 cols)
@@ -197,8 +198,46 @@ export default function LaporanTransaksi() {
     ws["!merges"] = merges;
     ws["!cols"] =
       viewMode === "rekap"
-        ? [{ wch: 6 }, { wch: 20 }, { wch: 28 }, { wch: 14 }, { wch: 14 }, { wch: 10 }]
+        ? [{ wch: 6 }, { wch: 20 }, { wch: 28 }, { wch: 14 }, { wch: 14 }]
         : [{ wch: 6 }, { wch: 12 }, { wch: 36 }, { wch: 6 }, { wch: 12 }, { wch: 12 }];
+
+    // Basic styling + borders to match PDF (thin gray border)
+    const BORDER_COLOR = "C8C8C8";
+    const borderThin = {
+      top: { style: "thin", color: { rgb: BORDER_COLOR } },
+      bottom: { style: "thin", color: { rgb: BORDER_COLOR } },
+      left: { style: "thin", color: { rgb: BORDER_COLOR } },
+      right: { style: "thin", color: { rgb: BORDER_COLOR } },
+    } as const;
+    const lastRow = wsData.length - 1;
+    const metaRows = branchName ? 3 : 2;
+    const headerRow = metaRows + 1; // meta + blank
+    // meta center
+    for (let r = 0; r < metaRows; r++) {
+      const addr = XLSX.utils.encode_cell({ r, c: 0 });
+      if (ws[addr]) {
+        ws[addr].s = { font: { bold: r === 0 }, alignment: { horizontal: "center" } };
+      }
+    }
+    // header style
+    for (let c = 0; c < headerCols; c++) {
+      const addr = XLSX.utils.encode_cell({ r: headerRow, c });
+      if (!ws[addr]) continue;
+      ws[addr].s = {
+        font: { bold: true, color: { rgb: "FFFFFF" } },
+        fill: { patternType: "solid", fgColor: { rgb: "2D2824" } },
+        alignment: { horizontal: "center" },
+        border: borderThin,
+      };
+    }
+    // borders for table area
+    for (let r = headerRow; r <= lastRow; r++) {
+      for (let c = 0; c < headerCols; c++) {
+        const addr = XLSX.utils.encode_cell({ r, c });
+        const cell = ws[addr] || (ws[addr] = { t: "s", v: "" } as any);
+        cell.s = { ...(cell.s || {}), border: borderThin };
+      }
+    }
 
     XLSX.utils.book_append_sheet(wb, ws, "Laporan");
     const buf = XLSX.write(wb, { bookType: "xlsx", type: "array" });
@@ -207,12 +246,19 @@ export default function LaporanTransaksi() {
 
   const downloadPdf = () => {
     const doc = new jsPDF();
+    const pageWidth = doc.internal.pageSize.getWidth();
+    let y = 16;
     doc.setFontSize(14);
-    doc.text("Laporan Transaksi", 14, 16);
+    doc.text("LAPORAN TRANSAKSI", pageWidth / 2, y, { align: "center" });
+    y += 6;
     doc.setFontSize(10);
-    doc.text(titleRange, 14, 22);
+    doc.text(periodText, pageWidth / 2, y, { align: "center" });
+    y += 5;
+    if (branchName) {
+      doc.text(String(branchName).toUpperCase(), pageWidth / 2, y, { align: "center" });
+      y += 6;
+    }
 
-    const headFill: [number, number, number] = [240, 240, 240];
     const borderColor: [number, number, number] = [210, 210, 210];
     const zebraFill: [number, number, number] = [248, 248, 248];
     const groupFill: [number, number, number] = [245, 245, 245];
@@ -220,37 +266,32 @@ export default function LaporanTransaksi() {
 
     if (viewMode === "rekap") {
       autoTable(doc, {
-        startY: 28,
-        head: [["No", "Kode Transaksi", "Customer", "Barber", "Jumlah Rp", "Status"]],
+        startY: Math.max(28, y),
+        head: [["No", "Kode Transaksi", "Customer", "Barber", "Jumlah Rp"]],
         body: details.map((d, idx) => [
           String(idx + 1),
           d.saleCode || d.bookingCode,
           d.customerName || "-",
           d.barber || "-",
           formatNumberId(d.total),
-          statusLabel(d.status),
         ]),
         foot: [
           [
             { content: `Total ${formatNumberId(detailSummary.count)}`, colSpan: 2 },
             { content: "", colSpan: 2 },
             { content: formatNumberId(detailSummary.totalRp), styles: { halign: "right" } },
-            "",
           ],
         ],
         theme: "grid",
-        styles: { fontSize: 9, cellPadding: 3, lineColor: borderColor, lineWidth: 0.1 },
-        headStyles: { fillColor: headFill, textColor: [90, 90, 90], fontStyle: "bold" },
+        styles: { fontSize: 9, cellPadding: 4, lineColor: borderColor, lineWidth: 0.5 },
+        headStyles: { fillColor: [45, 40, 36], textColor: [255, 255, 255], fontStyle: "bold", halign: "center" },
         alternateRowStyles: { fillColor: zebraFill },
         footStyles: { fillColor: totalFill, textColor: [0, 0, 0], fontStyle: "bold" },
         columnStyles: {
-          0: { halign: "center", cellWidth: 10 },
-          1: { cellWidth: 38 },
-          2: { cellWidth: 50 },
-          3: { cellWidth: 26 },
-          4: { halign: "right", cellWidth: 28 },
-          5: { halign: "center", cellWidth: 18 },
+          0: { halign: "center" },
+          4: { halign: "right" },
         },
+        margin: { left: 14, right: 14 },
       });
     } else {
       const body: unknown[] = [];
@@ -282,13 +323,6 @@ export default function LaporanTransaksi() {
           },
           { qty: 0, harga: 0, subtotal: 0 },
         );
-
-        body.push([
-          { content: "SUB TOTAL", colSpan: 3, styles: { fillColor: totalFill, fontStyle: "bold" } },
-          { content: formatNumberId(sub.qty), styles: { fillColor: totalFill, fontStyle: "bold", halign: "right" } },
-          { content: formatNumberId(sub.harga), styles: { fillColor: totalFill, fontStyle: "bold", halign: "right" } },
-          { content: formatNumberId(sub.subtotal), styles: { fillColor: totalFill, fontStyle: "bold", halign: "right" } },
-        ]);
       }
 
       // TOTAL row
@@ -300,20 +334,19 @@ export default function LaporanTransaksi() {
       ]);
 
       autoTable(doc, {
-        startY: 28,
+        startY: Math.max(28, y),
         head: [["No", "Item Type", "Nama Item", "Qty", "Harga", "Subtotal"]],
         body,
         theme: "grid",
-        styles: { fontSize: 9, cellPadding: 3, lineColor: borderColor, lineWidth: 0.1 },
-        headStyles: { fillColor: headFill, textColor: [90, 90, 90], fontStyle: "bold" },
+        styles: { fontSize: 9, cellPadding: 4, lineColor: borderColor, lineWidth: 0.5 },
+        headStyles: { fillColor: [45, 40, 36], textColor: [255, 255, 255], fontStyle: "bold", halign: "center" },
         columnStyles: {
-          0: { cellWidth: 10 },
-          1: { cellWidth: 24 },
-          2: { cellWidth: 74 },
-          3: { cellWidth: 16, halign: "right" },
-          4: { cellWidth: 28, halign: "right" },
-          5: { cellWidth: 30, halign: "right" },
+          0: { halign: "center" },
+          3: { halign: "right" },
+          4: { halign: "right" },
+          5: { halign: "right" },
         },
+        margin: { left: 14, right: 14 },
       });
     }
 
@@ -374,7 +407,7 @@ export default function LaporanTransaksi() {
               <div className="text-center text-muted-foreground p-6">Memuat data...</div>
             ) : (
               <div className="overflow-x-auto rounded-md border border-border/60">
-                <table className="w-full text-sm table-fixed min-w-[980px]">
+                <table className="w-full text-sm table-fixed min-w-[900px]">
                   <thead>
                     <tr className="border-b bg-muted/30 text-left text-muted-foreground">
                       <th className="py-3 px-3 font-medium w-16">No</th>
@@ -382,7 +415,6 @@ export default function LaporanTransaksi() {
                       <th className="py-3 px-3 font-medium">Customer</th>
                       <th className="py-3 px-3 font-medium w-44">Barber</th>
                       <th className="py-3 px-3 font-medium text-right w-44">Jumlah Rp</th>
-                      <th className="py-3 px-3 font-medium w-28">Status</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -393,12 +425,11 @@ export default function LaporanTransaksi() {
                         <td className="py-3 px-3 truncate">{d.customerName || "-"}</td>
                         <td className="py-3 px-3 truncate">{d.barber || "-"}</td>
                         <td className="py-3 px-3 text-right tabular-nums">{formatNumberId(d.total)}</td>
-                        <td className="py-3 px-3">{statusLabel(d.status)}</td>
                       </tr>
                     ))}
                     {details.length === 0 && (
                       <tr>
-                        <td colSpan={6} className="py-6 text-center text-muted-foreground">
+                        <td colSpan={5} className="py-6 text-center text-muted-foreground">
                           Tidak ada transaksi.
                         </td>
                       </tr>
@@ -411,7 +442,6 @@ export default function LaporanTransaksi() {
                       </td>
                       <td className="py-3 px-3" colSpan={2} />
                       <td className="py-3 px-3 text-right tabular-nums">{formatNumberId(detailSummary.totalRp)}</td>
-                      <td className="py-3 px-3" />
                     </tr>
                   </tfoot>
                 </table>
@@ -444,15 +474,6 @@ export default function LaporanTransaksi() {
                     <tbody>
                       {groups.map((g) => {
                         const code = g.saleCode || g.bookingCode;
-                        const sub = (g.items || []).reduce(
-                          (acc, it) => {
-                            acc.qty += Number(it.qty) || 0;
-                            acc.harga += Number(it.harga) || 0;
-                            acc.subtotal += Number(it.subtotal) || 0;
-                            return acc;
-                          },
-                          { qty: 0, harga: 0, subtotal: 0 },
-                        );
                         return (
                           <Fragment key={g.saleId}>
                             <tr className="bg-muted/50 border-b">
@@ -473,14 +494,6 @@ export default function LaporanTransaksi() {
                                 <td className="py-2 px-3 text-right tabular-nums">{formatNumberId(it.subtotal)}</td>
                               </tr>
                             ))}
-                            <tr className="bg-muted/40 border-b font-semibold">
-                              <td className="py-2 px-3" colSpan={3}>
-                                SUB TOTAL
-                              </td>
-                              <td className="py-2 px-3 text-right tabular-nums">{formatNumberId(sub.qty)}</td>
-                              <td className="py-2 px-3 text-right tabular-nums">{formatNumberId(sub.harga)}</td>
-                              <td className="py-2 px-3 text-right tabular-nums">{formatNumberId(sub.subtotal)}</td>
-                            </tr>
                           </Fragment>
                         );
                       })}

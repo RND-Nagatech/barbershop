@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -18,12 +18,6 @@ import {
 import { Plus, Pencil, Trash2, PlusCircle, MinusCircle } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { api, type Product, type Service } from "@/lib/api";
-import {
-  Accordion,
-  AccordionItem,
-  AccordionTrigger,
-  AccordionContent,
-} from "@/components/ui/accordion";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 export default function MasterLayanan() {
@@ -236,79 +230,81 @@ export default function MasterLayanan() {
       <Card className="border-border/50">
         <CardContent className="p-5">
           <div className="overflow-x-auto">
-            <Accordion type="single" collapsible value={expanded ?? undefined} onValueChange={setExpanded}>
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b text-left text-muted-foreground">
-                    <th className="pb-3 font-medium w-8"></th>
-                    <th className="pb-3 font-medium">Kode</th>
-                    <th className="pb-3 font-medium">Nama Layanan</th>
-                    <th className="pb-3 font-medium text-right">Harga</th>
-                    <th className="pb-3 font-medium text-right">Aksi</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.map((l) => (
-                    <AccordionItem key={l.id} value={l.id} asChild>
-                      <>
-                        <tr className="border-b last:border-0">
-                          <td className="py-3 text-center align-top">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              aria-label={expanded === l.id ? "Tutup" : "Lihat compliment"}
-                              onClick={() => handleExpand(l.id)}
-                              className="text-accent"
-                            >
-                              {expanded === l.id ? <MinusCircle className="w-5 h-5" /> : <PlusCircle className="w-5 h-5" />}
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-left text-muted-foreground">
+                  <th className="pb-3 font-medium w-10"></th>
+                  <th className="pb-3 font-medium w-32">Kode</th>
+                  <th className="pb-3 font-medium min-w-[240px]">Nama Layanan</th>
+                  <th className="pb-3 font-medium text-right w-40">Harga</th>
+                  <th className="pb-3 font-medium text-right w-28">Aksi</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.map((l) => {
+                  const isOpen = expanded === l.id;
+                  const compliments = Array.isArray(l.compliments) ? l.compliments : [];
+                  const complimentLines = compliments.map((c) => {
+                    const prod = products.find((p) => p.kode === c.kode);
+                    const name = prod ? prod.nama : c.kode;
+                    return `${name} (${c.kode}) x ${c.qty}`;
+                  });
+
+                  return (
+                    <Fragment key={l.id}>
+                      <tr className="border-b last:border-0">
+                        <td className="py-2 text-center align-top">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label={isOpen ? "Tutup" : "Lihat compliment"}
+                            onClick={() => handleExpand(l.id)}
+                            className="text-accent"
+                          >
+                            {isOpen ? <MinusCircle className="w-5 h-5" /> : <PlusCircle className="w-5 h-5" />}
+                          </Button>
+                        </td>
+                        <td className="py-2 font-medium align-top">{l.kode}</td>
+                        <td className="py-2 align-top">{l.nama}</td>
+                        <td className="py-2 text-right align-top tabular-nums">{formatRp(l.harga)}</td>
+                        <td className="py-2 text-right align-top">
+                          <div className="flex items-center justify-end gap-1">
+                            <Button variant="ghost" size="icon" onClick={() => openEdit(l)}>
+                              <Pencil className="w-4 h-4" />
                             </Button>
-                          </td>
-                          <td className="py-3 font-medium align-top">{l.kode}</td>
-                          <td className="py-3 align-top">{l.nama}</td>
-                          <td className="py-3 text-right align-top">{formatRp(l.harga)}</td>
-                          <td className="py-3 text-right align-top">
-                            <div className="flex items-center justify-end gap-1">
-                              <Button variant="ghost" size="icon" onClick={() => openEdit(l)}><Pencil className="w-4 h-4" /></Button>
-                              <Button variant="ghost" size="icon" onClick={() => setDeleteTarget(l)}><Trash2 className="w-4 h-4 text-destructive" /></Button>
+                            <Button variant="ghost" size="icon" onClick={() => setDeleteTarget(l)}>
+                              <Trash2 className="w-4 h-4 text-destructive" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+
+                      {isOpen && (
+                        <tr className="border-b last:border-0 bg-muted/40">
+                          <td colSpan={5} className="p-0">
+                            <div className="px-4 py-3">
+                              <div className="text-sm font-semibold">Compliment Produk:</div>
+                              {complimentLines.length > 0 ? (
+                                <div className="mt-1 text-sm whitespace-pre-line">{complimentLines.join("\n")}</div>
+                              ) : (
+                                <div className="mt-1 text-xs text-muted-foreground">Tidak ada compliment.</div>
+                              )}
                             </div>
                           </td>
                         </tr>
-                        <AccordionContent asChild>
-                          <tr>
-                            <td colSpan={5} style={{ padding: 0, background: 'var(--muted, #f5f5f5)' }}>
-                              <div style={{ padding: '8px 0 8px 0', margin: 0 }}>
-                                <div className="font-semibold pl-2 mb-1">Compliment Produk:</div>
-                                {l.compliments && l.compliments.length > 0 ? (
-                                  <div className="pl-4">
-                                    {l.compliments.map((c, idx) => {
-                                      const prod = products.find((p) => p.kode === c.kode);
-                                      return (
-                                        <div key={c.kode + idx} className="text-sm">
-                                          {prod ? prod.nama : c.kode} ({c.kode}) x {c.qty}
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                ) : (
-                                  <div className="text-muted-foreground text-xs pl-4">Tidak ada compliment.</div>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        </AccordionContent>
-                      </>
-                    </AccordionItem>
-                  ))}
-                  {data.length === 0 && (
-                    <tr>
-                      <td colSpan={5} className="py-6 text-center text-muted-foreground">
-                        Belum ada data layanan.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </Accordion>
+                      )}
+                    </Fragment>
+                  );
+                })}
+                {data.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="py-6 text-center text-muted-foreground">
+                      Belum ada data layanan.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </CardContent>
       </Card>

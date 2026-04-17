@@ -7,6 +7,8 @@ import { api, type Product } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { FileSpreadsheet, FileText } from "lucide-react";
 import { exportToExcel, exportToPDF } from "@/lib/exportUtils";
+import { buildPeriodeText, getActiveBranchName } from "@/lib/reportHeader";
+import { formatLocalYmd } from "@/lib/date";
 
 const formatRp = (n: number) =>
   new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(n);
@@ -14,6 +16,11 @@ const formatRp = (n: number) =>
 export default function LaporanStok() {
   const [data, setData] = useState<Product[]>([]);
   const [query, setQuery] = useState("");
+  const [branchName, setBranchName] = useState("");
+
+  useEffect(() => {
+    void getActiveBranchName().then(setBranchName);
+  }, []);
 
   const load = async () => {
     try {
@@ -37,6 +44,9 @@ export default function LaporanStok() {
     return data.filter((p) => `${p.kode} ${p.nama}`.toLowerCase().includes(q));
   }, [data, query]);
 
+  const todayYmd = formatLocalYmd(new Date()) || "";
+  const meta = { periodText: buildPeriodeText(todayYmd, todayYmd, todayYmd), branchName };
+
   return (
     <div>
       <PageHeader title="Laporan Stok" description="Ringkasan stok produk saat ini">
@@ -57,7 +67,7 @@ export default function LaporanStok() {
                 const low = (p.minStok ?? 0) > 0 && p.stok <= p.minStok;
                 return [p.kode, p.nama, formatRp(p.harga), p.stok, p.minStok, low ? "Low Stock" : "OK"];
               });
-              exportToExcel("Laporan Stok", headers, rows, "laporan_stok");
+              exportToExcel("Laporan Stok", headers, rows, "laporan_stok", undefined, meta);
             }}
           >
             <FileSpreadsheet className="w-4 h-4 mr-2" /> Excel
@@ -71,7 +81,7 @@ export default function LaporanStok() {
                 const low = (p.minStok ?? 0) > 0 && p.stok <= p.minStok;
                 return [p.kode, p.nama, formatRp(p.harga), p.stok, p.minStok, low ? "Low Stock" : "OK"];
               });
-              exportToPDF("Laporan Stok", headers, rows, "laporan_stok");
+              exportToPDF("Laporan Stok", headers, rows, "laporan_stok", undefined, meta);
             }}
           >
             <FileText className="w-4 h-4 mr-2" /> PDF

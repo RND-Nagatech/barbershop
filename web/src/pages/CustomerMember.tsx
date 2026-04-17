@@ -8,6 +8,17 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { toast } from "@/hooks/use-toast";
 import { api, type CustomerItem } from "@/lib/api";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Trash2 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 const formatNumberId = (n: number) => new Intl.NumberFormat("id-ID").format(Number(n) || 0);
 
@@ -17,6 +28,7 @@ export default function CustomerMember() {
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<CustomerItem | null>(null);
   const [creating, setCreating] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<CustomerItem | null>(null);
   const [form, setForm] = useState({ phone: "", name: "", isMember: false });
   const [sales, setSales] = useState<Array<{ id: string; bookingCode: string; total: number; status: "Paid" | "Void"; paidAt: string; paidYmd: string }>>([]);
 
@@ -71,13 +83,13 @@ export default function CustomerMember() {
         return;
       }
       if (creating) {
-        const created = await api.createCustomer({ phone: form.phone || undefined, name: form.name, isMember: form.isMember });
+        const created = await api.createCustomer({ phone: form.phone || undefined, name: form.name.toUpperCase(), isMember: form.isMember });
         toast({ title: "Berhasil", description: "Customer ditambahkan" });
         setCreating(false);
         setForm({ phone: "", name: "", isMember: false });
         setData((prev) => [created, ...prev]);
       } else if (editing) {
-        const updated = await api.updateCustomer(editing.id, { phone: form.phone || undefined, name: form.name, isMember: form.isMember });
+        const updated = await api.updateCustomer(editing.id, { phone: form.phone || undefined, name: form.name.toUpperCase(), isMember: form.isMember });
         toast({ title: "Berhasil", description: "Customer diperbarui" });
         setEditing(null);
         setSales([]);
@@ -86,6 +98,24 @@ export default function CustomerMember() {
     } catch (error) {
       toast({
         title: "Gagal menyimpan",
+        description: error instanceof Error ? error.message : "Terjadi kesalahan",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    try {
+      await api.deleteCustomer(deleteTarget.id);
+      toast({ title: "Berhasil", description: "Customer dihapus" });
+      if (editing?.id === deleteTarget.id) setEditing(null);
+      setDeleteTarget(null);
+      setSales([]);
+      setData((prev) => prev.filter((x) => x.id !== deleteTarget.id));
+    } catch (error) {
+      toast({
+        title: "Gagal menghapus",
         description: error instanceof Error ? error.message : "Terjadi kesalahan",
         variant: "destructive",
       });
@@ -142,9 +172,14 @@ export default function CustomerMember() {
                       <td className="py-3 text-right tabular-nums">{formatNumberId(c.pointsBalance || 0)}</td>
                       <td className="py-3 text-center tabular-nums">{c.visitCount || 0}</td>
                       <td className="py-3 text-right">
-                        <Button variant="outline" size="sm" onClick={() => openEdit(c)}>
-                          Detail
-                        </Button>
+                        <div className="flex items-center justify-end gap-1">
+                          <Button variant="outline" size="sm" onClick={() => openEdit(c)}>
+                            Detail
+                          </Button>
+                          <Button variant="ghost" size="icon" onClick={() => setDeleteTarget(c)}>
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -179,7 +214,7 @@ export default function CustomerMember() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-2">
                 <Label>Nama</Label>
-                <Input value={form.name} autoUppercase={false} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+                <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
               </div>
               <div className="space-y-2">
                 <Label>No HP</Label>
@@ -244,12 +279,41 @@ export default function CustomerMember() {
               </div>
             )}
 
-            <Button onClick={save} className="w-full bg-accent text-accent-foreground hover:bg-accent/90">
-              Simpan
-            </Button>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {!creating && (
+                <Button variant="destructive" onClick={() => (editing ? setDeleteTarget(editing) : null)} className="w-full">
+                  Hapus
+                </Button>
+              )}
+              <Button
+                onClick={save}
+                className={`${creating ? "sm:col-span-2" : ""} w-full bg-accent text-accent-foreground hover:bg-accent/90`}
+              >
+                Simpan
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(nextOpen) => (!nextOpen ? setDeleteTarget(null) : null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Hapus customer?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Data customer{deleteTarget ? ` "${deleteTarget.name || "-"}"` : ""} akan dihapus permanen.
+              <br />
+              Customer yang sudah punya transaksi/booking tidak bisa dihapus.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Batal</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Hapus
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
