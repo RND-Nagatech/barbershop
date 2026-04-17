@@ -46,7 +46,7 @@ export default function Login() {
           <div className="w-16 h-16 rounded-2xl bg-primary flex items-center justify-center mx-auto mb-4">
             <Scissors className="w-8 h-8 text-primary-foreground" />
           </div>
-          <h1 className="font-display text-3xl font-bold text-foreground">BarberPro</h1>
+          <h1 className="font-display text-3xl font-bold text-foreground">Barbershop</h1>
           <p className="text-muted-foreground text-sm mt-1">Management System</p>
         </div>
 
