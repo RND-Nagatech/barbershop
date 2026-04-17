@@ -40,17 +40,24 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
+    <div className="relative min-h-screen flex items-center justify-center p-4 overflow-hidden">
+      <div className="absolute inset-0 -z-20 bg-[url('/login-bg.jpg')] bg-no-repeat bg-center bg-cover md:bg-contain opacity-80 blur-sm" style={{backgroundSize: 'cover', backgroundPosition: 'center'}} />
+      {/* Overlay gelap transparan agar teks tetap jelas */}
+      <div className="absolute inset-0 -z-10 bg-black/30" />
+      {/* Hapus gradasi orange terang di kiri */}
+      <div className="absolute -z-10 -top-24 -left-24 h-80 w-80 rounded-full bg-accent/25 blur-3xl" />
+      <div className="absolute -z-10 -bottom-28 -right-24 h-96 w-96 rounded-full bg-primary/15 blur-3xl" />
+      <div className="absolute inset-0 -z-10 opacity-[0.06] [background-image:radial-gradient(#000_1px,transparent_1px)] [background-size:18px_18px]" />
       <div className="w-full max-w-md animate-fade-in">
         <div className="text-center mb-8">
-          <div className="w-16 h-16 rounded-2xl bg-primary flex items-center justify-center mx-auto mb-4">
-            <Scissors className="w-8 h-8 text-primary-foreground" />
+          <div className="w-16 h-16 rounded-2xl bg-black/90 flex items-center justify-center mx-auto mb-4">
+            <Scissors className="w-8 h-8 text-white" />
           </div>
-          <h1 className="font-display text-3xl font-bold text-foreground">Barbershop</h1>
-          <p className="text-muted-foreground text-sm mt-1">Management System</p>
+          <h1 className="font-display text-3xl font-bold text-black/90">Barbershop</h1>
+          <p className="text-black/80 text-sm mt-1">Management System</p>
         </div>
 
-        <Card className="border-border/50 shadow-lg">
+        <Card className="border-border/50 shadow-lg bg-card/80 backdrop-blur">
           <CardContent className="p-6">
             <form onSubmit={handleLogin} className="space-y-4">
               <div className="space-y-2">
