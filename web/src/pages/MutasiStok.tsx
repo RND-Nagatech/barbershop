@@ -54,7 +54,7 @@ export default function MutasiStok() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [from, to]);
 
-  const exportHeaders = ["Tanggal", "Kode", "Nama", "Delta", "Reason", "Ref"];
+  const exportHeaders = ["Tanggal", "Kode", "Nama", "Qty", "Alasan", "Ref"];
   const exportRows = useMemo(
     () =>
       data.map((m) => [
@@ -117,15 +117,15 @@ export default function MutasiStok() {
       <Card className="border-border/50">
         <CardContent className="p-5">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-sm table-fixed min-w-[900px] border-separate border-spacing-0">
               <thead>
                 <tr className="border-b text-left text-muted-foreground">
-                  <th className="pb-3 font-medium">Tanggal</th>
-                  <th className="pb-3 font-medium">Kode</th>
-                  <th className="pb-3 font-medium">Nama</th>
-                  <th className="pb-3 font-medium text-right">Delta</th>
-                  <th className="pb-3 font-medium">Reason</th>
-                  <th className="pb-3 font-medium">Ref</th>
+                  <th className="pb-3 px-3 font-medium w-28 border-r border-border/60">Tanggal</th>
+                  <th className="pb-3 px-3 font-medium w-28 border-r border-border/60">Kode</th>
+                  <th className="pb-3 px-3 font-medium border-r border-border/60">Nama</th>
+                  <th className="pb-3 px-3 font-medium text-right w-20 border-r border-border/60 whitespace-nowrap">Qty</th>
+                  <th className="pb-3 px-3 font-medium w-56 border-r border-border/60">Alasan</th>
+                  <th className="pb-3 px-3 font-medium w-40 whitespace-nowrap">Ref</th>
                 </tr>
               </thead>
               <tbody>
@@ -138,14 +138,18 @@ export default function MutasiStok() {
                 ) : (
                   data.map((m) => (
                     <tr key={m.id} className="border-b last:border-0">
-                      <td className="py-3">{m.ymd}</td>
-                      <td className="py-3 font-medium">{m.kode}</td>
-                      <td className="py-3">{m.nama}</td>
-                      <td className={`py-3 text-right font-medium ${m.delta < 0 ? "text-destructive" : "text-success"}`}>
+                      <td className="py-3 px-3 border-r border-border/60">{m.ymd}</td>
+                      <td className="py-3 px-3 font-medium border-r border-border/60">{m.kode}</td>
+                      <td className="py-3 px-3 border-r border-border/60">{m.nama}</td>
+                      <td
+                        className={`py-3 px-3 text-right font-medium tabular-nums border-r border-border/60 whitespace-nowrap ${
+                          m.delta < 0 ? "text-destructive" : "text-success"
+                        }`}
+                      >
                         {m.delta > 0 ? `+${m.delta}` : String(m.delta)}
                       </td>
-                      <td className="py-3">{m.reason}</td>
-                      <td className="py-3">{m.refBookingCode || "-"}</td>
+                      <td className="py-3 px-3 border-r border-border/60">{m.reason}</td>
+                      <td className="py-3 px-3 whitespace-nowrap">{m.refBookingCode || "-"}</td>
                     </tr>
                   ))
                 )}

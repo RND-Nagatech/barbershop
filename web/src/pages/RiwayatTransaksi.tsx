@@ -253,12 +253,12 @@ export default function RiwayatTransaksi() {
 
       <AlertDialog open={voidOpen} onOpenChange={setVoidOpen}>
         <AlertDialogContent>
-          <AlertDialogHeader>
+            <AlertDialogHeader>
             <AlertDialogTitle>Void transaksi {detail?.saleCode || detail?.bookingCode}?</AlertDialogTitle>
           </AlertDialogHeader>
           <div className="space-y-2">
             <div className="text-sm text-muted-foreground">Stok produk (jika ada) akan dikembalikan, dan booking jadi bisa dibayar ulang.</div>
-            <Input value={voidReason} autoUppercase={false} onChange={(e) => setVoidReason(e.target.value)} placeholder="Alasan void (opsional)" />
+            <Input value={voidReason} onChange={(e) => setVoidReason(e.target.value)} placeholder="Alasan void (opsional)" />
           </div>
           <AlertDialogFooter>
             <AlertDialogCancel>Batal</AlertDialogCancel>

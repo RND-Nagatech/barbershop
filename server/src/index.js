@@ -1497,7 +1497,7 @@ app.post(
     const _id = toObjectId(req.params.id);
     if (!_id) return res.status(400).json({ message: "ID tidak valid" });
 
-    const reason = String(req.body?.reason || "").trim();
+    const reason = String(req.body?.reason || "").trim().toUpperCase();
     const sale = await Sale.findById(_id).lean();
     if (!sale) return res.status(404).json({ message: "Data tidak ditemukan" });
     if (sale.status === "Void") return res.status(409).json({ message: "Transaksi sudah di-void" });

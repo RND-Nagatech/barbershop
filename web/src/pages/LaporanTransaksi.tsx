@@ -299,7 +299,13 @@ export default function LaporanTransaksi() {
       for (const g of groups) {
         const code = g.saleCode || g.bookingCode;
 
-        body.push([{ content: code, colSpan: 6, styles: { fillColor: groupFill, fontStyle: "bold" } }]);
+        body.push([
+          {
+            content: code,
+            colSpan: 6,
+            styles: { fillColor: groupFill, fontStyle: "bold", halign: "left" },
+          },
+        ]);
 
         (g.items || []).forEach((it, idx) => {
           const fill = idx % 2 === 1 ? zebraFill : undefined;
