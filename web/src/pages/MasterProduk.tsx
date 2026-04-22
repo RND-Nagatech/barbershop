@@ -27,10 +27,21 @@ export default function MasterProduk() {
   const [lowStock, setLowStock] = useState<Product[]>([]);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
-  const [form, setForm] = useState({ kode: "", nama: "", harga: "", stok: "0", minStok: "0" });
+  const [form, setForm] = useState({
+    kode: "",
+    nama: "",
+    harga: "",
+    stok: "0",
+    minStok: "0",
+    type_komisi: "persentase" as "persentase" | "rupiah",
+    nilai_komisi: "0",
+  });
   const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
   const [stockTarget, setStockTarget] = useState<Product | null>(null);
   const [stockDelta, setStockDelta] = useState("");
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [bulkCommissionType, setBulkCommissionType] = useState<"persentase" | "rupiah">("persentase");
+  const [bulkCommissionValue, setBulkCommissionValue] = useState("0");
 
   const formatNumberInput = (value: string) => {
     const digits = value.replace(/\D/g, "");
@@ -69,6 +80,8 @@ export default function MasterProduk() {
       harga: Number(form.harga),
       stok: Number(form.stok || "0"),
       minStok: Number(form.minStok || "0"),
+      type_komisi: form.type_komisi,
+      nilai_komisi: Number(form.nilai_komisi || "0"),
     };
 
     try {
@@ -80,7 +93,7 @@ export default function MasterProduk() {
         toast({ title: "Berhasil", description: "Produk ditambahkan" });
       }
       await load();
-      setForm({ kode: "", nama: "", harga: "", stok: "0", minStok: "0" });
+      setForm({ kode: "", nama: "", harga: "", stok: "0", minStok: "0", type_komisi: "persentase", nilai_komisi: "0" });
       setEditing(null);
       setOpen(false);
     } catch (error) {
@@ -117,13 +130,15 @@ export default function MasterProduk() {
       harga: String(p.harga),
       stok: String(p.stok ?? 0),
       minStok: String(p.minStok ?? 0),
+      type_komisi: p.type_komisi || "persentase",
+      nilai_komisi: String(p.nilai_komisi ?? 0),
     });
     setOpen(true);
   };
 
   const openAdd = () => {
     setEditing(null);
-    setForm({ kode: "", nama: "", harga: "", stok: "0", minStok: "0" });
+    setForm({ kode: "", nama: "", harga: "", stok: "0", minStok: "0", type_komisi: "persentase", nilai_komisi: "0" });
     setOpen(true);
   };
 
@@ -148,6 +163,41 @@ export default function MasterProduk() {
     } catch (error) {
       toast({
         title: "Gagal update stok",
+        description: error instanceof Error ? error.message : "Terjadi kesalahan",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const toggleSelectRow = (id: string) => {
+    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.length === data.length) {
+      setSelectedIds([]);
+      return;
+    }
+    setSelectedIds(data.map((r) => r.id));
+  };
+
+  const handleBulkApply = async () => {
+    if (selectedIds.length === 0) {
+      toast({ title: "Pilih data dulu", description: "Centang minimal satu produk.", variant: "destructive" });
+      return;
+    }
+    try {
+      await api.bulkUpdateProductCommission({
+        ids: selectedIds,
+        type_komisi: bulkCommissionType,
+        nilai_komisi: Number(bulkCommissionValue || "0"),
+      });
+      await load();
+      toast({ title: "Berhasil", description: `Komisi diterapkan ke ${selectedIds.length} produk` });
+      setSelectedIds([]);
+    } catch (error) {
+      toast({
+        title: "Gagal bulk update",
         description: error instanceof Error ? error.message : "Terjadi kesalahan",
         variant: "destructive",
       });
@@ -203,6 +253,28 @@ export default function MasterProduk() {
                   onChange={(e) => setForm({ ...form, minStok: sanitizeNumberInput(e.target.value) })}
                 />
               </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label>Tipe Komisi</Label>
+                  <select
+                    className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
+                    value={form.type_komisi}
+                    onChange={(e) => setForm({ ...form, type_komisi: e.target.value as "persentase" | "rupiah" })}
+                  >
+                    <option value="persentase">Persentase (%)</option>
+                    <option value="rupiah">Nominal (Rp)</option>
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <Label>{form.type_komisi === "persentase" ? "Nilai Komisi (%)" : "Nilai Komisi (Rp)"}</Label>
+                  <Input
+                    type="text"
+                    inputMode="numeric"
+                    value={form.type_komisi === "rupiah" ? formatNumberInput(form.nilai_komisi) : form.nilai_komisi}
+                    onChange={(e) => setForm({ ...form, nilai_komisi: sanitizeNumberInput(e.target.value) })}
+                  />
+                </div>
+              </div>
               <Button onClick={handleSave} className="w-full bg-accent text-accent-foreground hover:bg-accent/90">
                 Simpan
               </Button>
@@ -224,13 +296,49 @@ export default function MasterProduk() {
 
       <Card className="border-border/50">
         <CardContent className="p-5">
+          <div className="mb-4 rounded-lg border border-border/60 p-3">
+            <div className="text-sm font-medium mb-2">Edit Komisi</div>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+              <select
+                className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                value={bulkCommissionType}
+                onChange={(e) => setBulkCommissionType(e.target.value as "persentase" | "rupiah")}
+              >
+                <option value="persentase">Persentase (%)</option>
+                <option value="rupiah">Nominal (Rp)</option>
+              </select>
+              <Input
+                value={bulkCommissionType === "rupiah" ? formatNumberInput(bulkCommissionValue) : bulkCommissionValue}
+                inputMode="numeric"
+                onChange={(e) => setBulkCommissionValue(sanitizeNumberInput(e.target.value))}
+                placeholder={bulkCommissionType === "persentase" ? "Contoh: 5" : "Contoh: 10.000"}
+              />
+              <Button variant="outline" onClick={toggleSelectAll}>
+                {selectedIds.length === data.length && data.length > 0 ? "Batal Pilih Semua" : "Pilih Semua"}
+              </Button>
+              <Button onClick={handleBulkApply} className="bg-accent text-accent-foreground hover:bg-accent/90">
+                Terapkan ({selectedIds.length})
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground mt-2">
+              Atur komisi produk sekaligus, lalu edit satuan jika ada produk khusus.
+            </p>
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b text-left text-muted-foreground">
+                  <th className="pb-3 font-medium w-10">
+                    <input
+                      type="checkbox"
+                      checked={data.length > 0 && selectedIds.length === data.length}
+                      onChange={toggleSelectAll}
+                    />
+                  </th>
                   <th className="pb-3 font-medium">Kode</th>
                   <th className="pb-3 font-medium">Nama Produk</th>
                   <th className="pb-3 font-medium text-right">Harga</th>
+                  <th className="pb-3 font-medium text-right">Komisi</th>
                   <th className="pb-3 font-medium text-center">Stok</th>
                   <th className="pb-3 font-medium text-center">Min</th>
                   <th className="pb-3 font-medium text-right">Aksi</th>
@@ -239,9 +347,17 @@ export default function MasterProduk() {
               <tbody>
                 {data.map((p) => (
                   <tr key={p.id} className={`border-b last:border-0 ${(p.minStok ?? 0) > 0 && p.stok <= p.minStok ? "bg-warning/5" : ""}`}>
+                    <td className="py-3">
+                      <input type="checkbox" checked={selectedIds.includes(p.id)} onChange={() => toggleSelectRow(p.id)} />
+                    </td>
                     <td className="py-3 font-medium">{p.kode}</td>
                     <td className="py-3">{p.nama}</td>
                     <td className="py-3 text-right">{formatRp(p.harga)}</td>
+                    <td className="py-3 text-right">
+                      {p.type_komisi === "rupiah"
+                        ? formatRp(Number(p.nilai_komisi || 0))
+                        : `${Number(p.nilai_komisi || 0)}%`}
+                    </td>
                     <td className="py-3 text-center">{p.stok ?? 0}</td>
                     <td className="py-3 text-center">{p.minStok ?? 0}</td>
                     <td className="py-3 text-right">
@@ -261,7 +377,7 @@ export default function MasterProduk() {
                 ))}
                 {data.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="py-6 text-center text-muted-foreground">
+                    <td colSpan={8} className="py-6 text-center text-muted-foreground">
                       Belum ada data produk.
                     </td>
                   </tr>

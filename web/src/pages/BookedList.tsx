@@ -16,13 +16,46 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { CheckCircle } from "lucide-react";
+import { CheckCircle, X, ZoomIn, ZoomOut } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
-import { api, type BookingItem, type Employee, type Service } from "@/lib/api";
+import { api, resolveMediaUrl, type BookingItem, type Employee, type Service } from "@/lib/api";
 import { formatLocalYmd } from "@/lib/date";
 
 function getToday() {
   return formatLocalYmd(new Date()) ?? "";
+}
+
+const emptyFotoSet = { depan: "", kiri: "", kanan: "", belakang: "" };
+const fotoSlots: Array<{ key: keyof typeof emptyFotoSet; label: string }> = [
+  { key: "depan", label: "Tampak Depan" },
+  { key: "kiri", label: "Samping Kiri" },
+  { key: "kanan", label: "Samping Kanan" },
+  { key: "belakang", label: "Tampak Belakang" },
+];
+
+async function fileToCompressedDataUrl(file: File, maxSide = 1280, quality = 0.82): Promise<string> {
+  const rawDataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("Gagal membaca file"));
+    reader.readAsDataURL(file);
+  });
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const el = new Image();
+    el.onload = () => resolve(el);
+    el.onerror = () => reject(new Error("Gagal memproses gambar"));
+    el.src = rawDataUrl;
+  });
+  const ratio = Math.min(1, maxSide / Math.max(img.width, img.height));
+  const width = Math.max(1, Math.round(img.width * ratio));
+  const height = Math.max(1, Math.round(img.height * ratio));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return rawDataUrl;
+  ctx.drawImage(img, 0, 0, width, height);
+  return canvas.toDataURL("image/jpeg", quality);
 }
 
 export default function BookedList() {
@@ -60,6 +93,11 @@ export default function BookedList() {
   const [completeTarget, setCompleteTarget] = useState<string | null>(null);
   const [addServiceTarget, setAddServiceTarget] = useState<string | null>(null);
   const [selectedService, setSelectedService] = useState("");
+  const [photoTarget, setPhotoTarget] = useState<BookingItem | null>(null);
+  const [photoForm, setPhotoForm] = useState(emptyFotoSet);
+  const [photoSaving, setPhotoSaving] = useState(false);
+  const [photoPreview, setPhotoPreview] = useState<{ src: string; label: string } | null>(null);
+  const [photoZoom, setPhotoZoom] = useState(1);
 
   const handleAssign = async () => {
     if (!assignTarget) return;
@@ -113,6 +151,63 @@ export default function BookedList() {
     }
   };
 
+  const openPhotoDialog = (booking: BookingItem) => {
+    const firstFoto = booking.foto?.[0];
+    setPhotoTarget(booking);
+    setPhotoForm({
+      depan: resolveMediaUrl(firstFoto?.depan || ""),
+      kiri: resolveMediaUrl(firstFoto?.kiri || ""),
+      kanan: resolveMediaUrl(firstFoto?.kanan || ""),
+      belakang: resolveMediaUrl(firstFoto?.belakang || ""),
+    });
+  };
+
+  const handleChoosePhoto = async (key: keyof typeof emptyFotoSet, file?: File | null) => {
+    if (!file) return;
+    try {
+      const dataUrl = await fileToCompressedDataUrl(file);
+      setPhotoForm((prev) => ({ ...prev, [key]: dataUrl }));
+    } catch (error) {
+      toast({
+        title: "Gagal memproses foto",
+        description: error instanceof Error ? error.message : "Terjadi kesalahan",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const savePhotos = async () => {
+    if (!photoTarget) return;
+    setPhotoSaving(true);
+    try {
+      await api.saveBookingHaircutPhotos(photoTarget.id, photoForm);
+      await loadData();
+      toast({ title: "Berhasil", description: "Foto terakhir disimpan" });
+      setPhotoTarget(null);
+      setPhotoForm(emptyFotoSet);
+    } catch (error) {
+      toast({
+        title: "Gagal menyimpan foto",
+        description: error instanceof Error ? error.message : "Terjadi kesalahan",
+        variant: "destructive",
+      });
+    } finally {
+      setPhotoSaving(false);
+    }
+  };
+
+  const removePhoto = (key: keyof typeof emptyFotoSet) => {
+    setPhotoForm((prev) => ({ ...prev, [key]: "" }));
+  };
+
+  const openPhotoPreview = (src: string, label: string) => {
+    setPhotoPreview({ src, label });
+    setPhotoZoom(1);
+  };
+
+  const zoomInPreview = () => setPhotoZoom((z) => Math.min(4, z + 0.2));
+  const zoomOutPreview = () => setPhotoZoom((z) => Math.max(1, z - 0.2));
+
   const statusVariant: Record<string, string> = {
     Menunggu: "bg-muted text-muted-foreground",
     Proses: "bg-warning/10 text-warning",
@@ -125,7 +220,7 @@ export default function BookedList() {
   const selesaiRows = data.filter((b) => b.status === "Selesai").slice().sort(sortByAntrianAsc);
 
   const renderCards = (rows: BookingItem[]) => (
-    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       {rows.map((b) => (
         <Card key={b.id} className={`border-border/50 ${b.status === "Selesai" ? "opacity-60" : ""}`}>
           <CardContent className="p-5">
@@ -148,6 +243,12 @@ export default function BookedList() {
                   <Badge key={l.kode} variant="secondary" className="text-xs">{l.nama}</Badge>
                 ))}
               </div>
+              <p className="text-xs text-muted-foreground">
+                Foto tersimpan: {fotoSlots.filter((slot) => Boolean(String(b.foto?.[0]?.[slot.key] || ""))).length}/4
+              </p>
+              <Button onClick={() => openPhotoDialog(b)} variant="outline" className="w-full" size="sm">
+                Tambah Foto
+              </Button>
             </div>
 
             {b.status === "Menunggu" && (
@@ -245,7 +346,10 @@ export default function BookedList() {
         </div>
         <div>
           <label className="block text-xs mb-1">Status</label>
-          <Select value={status} onValueChange={setStatus}>
+          <Select
+            value={status}
+            onValueChange={(value) => setStatus(value as "Aktif" | "Menunggu" | "Proses" | "Selesai")}
+          >
             <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="Aktif">Aktif</SelectItem>
@@ -304,6 +408,130 @@ export default function BookedList() {
             </Select>
             <Button onClick={handleAddService} disabled={!selectedService} className="w-full bg-accent text-accent-foreground hover:bg-accent/90">
               Tambahkan
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!photoTarget}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPhotoTarget(null);
+            setPhotoForm(emptyFotoSet);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="font-display">Foto Hasil Pangkas Rambut {photoTarget?.bookingCode}</DialogTitle>
+          </DialogHeader>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {fotoSlots.map((slot) => (
+              <div key={slot.key} className="space-y-2 rounded-md border border-border/70 p-2">
+                <div className="text-xs font-medium">{slot.label}</div>
+                <input
+                  id={`haircut-photo-${slot.key}`}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => void handleChoosePhoto(slot.key, e.target.files?.[0])}
+                />
+                <div className="flex items-center gap-2">
+                  <label
+                    htmlFor={`haircut-photo-${slot.key}`}
+                    className="inline-flex h-9 items-center rounded-md border border-input bg-background px-3 text-sm font-medium cursor-pointer hover:bg-accent/10"
+                  >
+                    {photoForm[slot.key] ? "Ganti Foto" : "Upload Foto"}
+                  </label>
+                  <span className="text-xs text-muted-foreground truncate">
+                    {photoForm[slot.key] ? "Foto sudah dipilih" : "Belum ada file"}
+                  </span>
+                </div>
+                {photoForm[slot.key] ? (
+                  <div className="relative">
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      size="icon"
+                      className="absolute right-1 top-1 z-10 h-7 w-7"
+                      onClick={() => removePhoto(slot.key)}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                    <img
+                      src={photoForm[slot.key]}
+                      alt={slot.label}
+                      onClick={() => openPhotoPreview(photoForm[slot.key], slot.label)}
+                      className="w-full h-28 object-cover rounded border border-border/70 cursor-zoom-in"
+                    />
+                  </div>
+                ) : (
+                  <div className="w-full h-28 rounded border border-dashed border-border/70 text-xs text-muted-foreground flex items-center justify-center">
+                    Belum ada foto
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          <Button onClick={savePhotos} disabled={photoSaving} className="w-full bg-accent text-accent-foreground hover:bg-accent/90">
+            {photoSaving ? "Menyimpan..." : "Simpan Foto"}
+          </Button>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!photoPreview}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPhotoPreview(null);
+            setPhotoZoom(1);
+          }
+        }}
+      >
+        <DialogContent className="w-[588px] h-[786px] max-w-[94vw] max-h-[92vh] border-none bg-transparent p-0 shadow-none [&>button]:hidden">
+          <div className="relative mx-auto w-full h-full overflow-hidden rounded-2xl bg-black">
+            {photoPreview?.src ? (
+              <div className="w-full h-full flex items-center justify-center p-2">
+                <img
+                  src={photoPreview.src}
+                  alt={photoPreview.label}
+                  className="block w-full h-full origin-center rounded-xl object-cover transition-transform duration-75"
+                  style={{ transform: `scale(${photoZoom})` }}
+                />
+              </div>
+            ) : null}
+            <div className="absolute right-3 top-1/2 -translate-y-1/2 flex flex-col gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-10 w-10 rounded-full bg-black/60 text-white hover:bg-black/75 hover:text-white"
+                onClick={zoomInPreview}
+              >
+                <ZoomIn className="h-5 w-5" />
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-10 w-10 rounded-full bg-black/60 text-white hover:bg-black/75 hover:text-white"
+                onClick={zoomOutPreview}
+              >
+                <ZoomOut className="h-5 w-5" />
+              </Button>
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="absolute right-3 top-3 h-12 w-12 rounded-full bg-black/60 text-white hover:bg-black/75 hover:text-white"
+              onClick={() => {
+                setPhotoPreview(null);
+                setPhotoZoom(1);
+              }}
+            >
+              <X className="h-7 w-7" />
             </Button>
           </div>
         </DialogContent>

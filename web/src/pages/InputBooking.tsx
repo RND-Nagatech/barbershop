@@ -197,8 +197,22 @@ export default function InputBooking() {
                     <Input value={form.noHp} onChange={(e) => setForm({ ...form, noHp: e.target.value })} placeholder="08xxxxxxxxxx" />
                   </div>
                 </div>
-
-                {/* Input pegawai disembunyikan, assign dilakukan di menu Booked */}
+                <div className="space-y-2">
+                  <Label>Pilih Barberman (Opsional)</Label>
+                  <Select value={form.pegawai || "__none__"} onValueChange={(value) => setForm({ ...form, pegawai: value === "__none__" ? "" : value })}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Pilih barberman..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">Belum ditentukan</SelectItem>
+                      {employees.map((employee) => (
+                        <SelectItem key={employee.id} value={employee.nama}>
+                          {employee.nama}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
 
                 <div className="space-y-3">
                   <Label>Pilih Layanan</Label>

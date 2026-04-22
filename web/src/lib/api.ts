@@ -20,6 +20,20 @@ export function getAuthUser(): UserItem | null {
   }
 }
 
+export function resolveMediaUrl(value: string): string {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (/^https?:\/\//i.test(raw)) return raw;
+  if (raw.startsWith("/uploads/")) {
+    try {
+      return `${new URL(API_BASE_URL).origin}${raw}`;
+    } catch {
+      return raw;
+    }
+  }
+  return raw;
+}
+
 async function request<T>(path: string, method: HttpMethod = "GET", body?: unknown): Promise<T> {
   const token = getAuthToken();
   const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -54,6 +68,8 @@ export interface Service {
   kode: string;
   nama: string;
   harga: number;
+  type_komisi: "persentase" | "rupiah";
+  nilai_komisi: number;
   compliments?: Array<{ kode: string; qty: number }>;
 }
 
@@ -64,6 +80,16 @@ export interface Product {
   harga: number;
   stok: number;
   minStok: number;
+  type_komisi: "persentase" | "rupiah";
+  nilai_komisi: number;
+}
+
+export interface HaircutPhotoSet {
+  depan: string;
+  kiri: string;
+  kanan: string;
+  belakang: string;
+  updatedAt?: string;
 }
 
 export interface Branch {
@@ -111,6 +137,7 @@ export interface BookingItem {
   createdAt: string;
   paymentStatus: "Unpaid" | "Paid";
   paidAt?: string;
+  foto?: HaircutPhotoSet[];
 }
 
 export interface PublicBookingStatus {
@@ -390,12 +417,24 @@ export const api = {
   getServices: () => request<Service[]>("/layanan"),
   createService: (payload: Omit<Service, "id">) => request<Service>("/layanan", "POST", payload),
   updateService: (id: string, payload: Omit<Service, "id">) => request<Service>(`/layanan/${id}`, "PUT", payload),
+  bulkUpdateServiceCommission: (payload: { ids: string[]; type_komisi: "persentase" | "rupiah"; nilai_komisi: number }) =>
+    request<{ matchedCount: number; modifiedCount: number; type_komisi: "persentase" | "rupiah"; nilai_komisi: number }>(
+      "/layanan/commission/bulk",
+      "PATCH",
+      payload,
+    ),
   deleteService: (id: string) => request<void>(`/layanan/${id}`, "DELETE"),
 
   getProducts: () => request<Product[]>("/produk"),
   getLowStockProducts: () => request<Product[]>("/produk/low-stock"),
   createProduct: (payload: Omit<Product, "id">) => request<Product>("/produk", "POST", payload),
   updateProduct: (id: string, payload: Omit<Product, "id">) => request<Product>(`/produk/${id}`, "PUT", payload),
+  bulkUpdateProductCommission: (payload: { ids: string[]; type_komisi: "persentase" | "rupiah"; nilai_komisi: number }) =>
+    request<{ matchedCount: number; modifiedCount: number; type_komisi: "persentase" | "rupiah"; nilai_komisi: number }>(
+      "/produk/commission/bulk",
+      "PATCH",
+      payload,
+    ),
   deleteProduct: (id: string) => request<void>(`/produk/${id}`, "DELETE"),
   adjustProductStock: (id: string, delta: number) => request<Product>(`/produk/${id}/adjust-stock`, "PATCH", { delta }),
 
@@ -545,6 +584,10 @@ export const api = {
   },
   assignBooking: (id: string, employeeName: string) => request(`/bookings/${id}/assign`, "PATCH", { employeeName }),
   completeBooking: (id: string) => request(`/bookings/${id}/complete`, "PATCH"),
+  saveBookingHaircutPhotos: (id: string, payload: Partial<Pick<HaircutPhotoSet, "depan" | "kiri" | "kanan" | "belakang">>) =>
+    request<{ id: string; bookingCode: string; customerId?: string; foto: HaircutPhotoSet[] }>(`/bookings/${id}/haircut-photos`, "PATCH", payload),
+  getBookingHaircutPhotosByCode: (bookingCode: string) =>
+    request<{ bookingCode: string; foto: HaircutPhotoSet[] }>(`/bookings/by-code/${encodeURIComponent(bookingCode)}/haircut-photos`),
 
   getDashboard: () => request<DashboardPayload>("/dashboard"),
   getFinanceReport: (params?: {

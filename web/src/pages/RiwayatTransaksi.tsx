@@ -10,14 +10,22 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { toast } from "@/hooks/use-toast";
-import { api, type SaleDetail, type SaleListItem } from "@/lib/api";
+import { api, resolveMediaUrl, type SaleDetail, type SaleListItem } from "@/lib/api";
 import { formatLocalYmd } from "@/lib/date";
 import { buildReceiptText, generateReceiptPdf, openEmailReceipt, openReceiptPrintWindow, openWhatsAppReceipt, type ReceiptData } from "@/lib/receiptUtils";
 import { Checkbox } from "@/components/ui/checkbox";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { Eye, X, ZoomIn, ZoomOut } from "lucide-react";
 
 const formatRp = (n: number) =>
   new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(n);
+
+const fotoSlots = [
+  { key: "depan", label: "Tampak Depan" },
+  { key: "kiri", label: "Samping Kiri" },
+  { key: "kanan", label: "Samping Kanan" },
+  { key: "belakang", label: "Tampak Belakang" },
+] as const;
 
 export default function RiwayatTransaksi() {
   const getToday = () => formatLocalYmd(new Date()) ?? "";
@@ -32,6 +40,12 @@ export default function RiwayatTransaksi() {
   const [voidOpen, setVoidOpen] = useState(false);
   const [voidReason, setVoidReason] = useState("");
   const [email, setEmail] = useState("");
+  const [haircutView, setHaircutView] = useState<{
+    bookingCode: string;
+    foto: Array<{ depan: string; kiri: string; kanan: string; belakang: string; updatedAt?: string }>;
+  } | null>(null);
+  const [photoPreview, setPhotoPreview] = useState<{ src: string; label: string } | null>(null);
+  const [photoZoom, setPhotoZoom] = useState(1);
 
   const load = async () => {
     setLoading(true);
@@ -72,6 +86,30 @@ export default function RiwayatTransaksi() {
       });
     }
   };
+
+  const openHaircutPhotos = async (bookingCode: string) => {
+    if (!bookingCode) {
+      toast({ title: "Tidak ada booking", description: "Transaksi ini tidak memiliki kode booking.", variant: "destructive" });
+      return;
+    }
+    try {
+      const payload = await api.getBookingHaircutPhotosByCode(bookingCode);
+      setHaircutView(payload);
+    } catch (error) {
+      toast({
+        title: "Gagal memuat foto",
+        description: error instanceof Error ? error.message : "Terjadi kesalahan",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const openPhotoPreview = (src: string, label: string) => {
+    setPhotoPreview({ src, label });
+    setPhotoZoom(1);
+  };
+  const zoomInPreview = () => setPhotoZoom((z) => Math.min(4, z + 0.2));
+  const zoomOutPreview = () => setPhotoZoom((z) => Math.max(1, z - 0.2));
 
   const receiptData: ReceiptData | null = useMemo(() => {
     if (!detail) return null;
@@ -147,9 +185,14 @@ export default function RiwayatTransaksi() {
                       <td className="py-3">{new Date(s.paidAt).toLocaleString("id-ID")}</td>
                       <td className="py-3 text-right">{formatRp(s.total)}</td>
                       <td className="py-3 text-right">
-                        <Button variant="outline" size="sm" onClick={() => openDetail(s.id)}>
-                          Reprint
-                        </Button>
+                        <div className="flex items-center justify-end gap-2">
+                          <Button variant="outline" size="icon" onClick={() => openHaircutPhotos(s.bookingCode)} disabled={!s.bookingCode} title="Lihat Foto">
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                          <Button variant="outline" size="sm" onClick={() => openDetail(s.id)}>
+                            Reprint
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -247,6 +290,81 @@ export default function RiwayatTransaksi() {
               PDF
             </Button>
             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!haircutView} onOpenChange={(open) => (!open ? setHaircutView(null) : null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="font-display">Foto Hasil Pangkas Rambut {haircutView?.bookingCode}</DialogTitle>
+          </DialogHeader>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {fotoSlots.map((slot) => {
+              const src = resolveMediaUrl(haircutView?.foto?.[0]?.[slot.key] || "");
+              return (
+                <div key={slot.key} className="space-y-2 rounded-md border border-border/70 p-2">
+                  <div className="text-xs font-medium">{slot.label}</div>
+                  {src ? (
+                    <img
+                      src={src}
+                      alt={slot.label}
+                      onClick={() => openPhotoPreview(src, slot.label)}
+                      className="w-full h-28 object-cover rounded border border-border/70 cursor-zoom-in"
+                    />
+                  ) : (
+                    <div className="w-full h-28 rounded border border-dashed border-border/70 text-xs text-muted-foreground flex items-center justify-center">
+                      Belum ada foto
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!photoPreview}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPhotoPreview(null);
+            setPhotoZoom(1);
+          }
+        }}
+      >
+        <DialogContent className="w-[588px] h-[786px] max-w-[94vw] max-h-[92vh] border-none bg-transparent p-0 shadow-none [&>button]:hidden">
+          <div className="relative mx-auto w-full h-full overflow-hidden rounded-2xl bg-black">
+            {photoPreview?.src ? (
+              <div className="w-full h-full flex items-center justify-center p-2">
+                <img
+                  src={photoPreview.src}
+                  alt={photoPreview.label}
+                  className="block w-full h-full origin-center rounded-xl object-cover transition-transform duration-75"
+                  style={{ transform: `scale(${photoZoom})` }}
+                />
+              </div>
+            ) : null}
+            <div className="absolute right-3 top-1/2 -translate-y-1/2 flex flex-col gap-2">
+              <Button type="button" variant="ghost" size="icon" className="h-10 w-10 rounded-full bg-black/60 text-white hover:bg-black/75 hover:text-white" onClick={zoomInPreview}>
+                <ZoomIn className="h-5 w-5" />
+              </Button>
+              <Button type="button" variant="ghost" size="icon" className="h-10 w-10 rounded-full bg-black/60 text-white hover:bg-black/75 hover:text-white" onClick={zoomOutPreview}>
+                <ZoomOut className="h-5 w-5" />
+              </Button>
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="absolute right-3 top-3 h-12 w-12 rounded-full bg-black/60 text-white hover:bg-black/75 hover:text-white"
+              onClick={() => {
+                setPhotoPreview(null);
+                setPhotoZoom(1);
+              }}
+            >
+              <X className="h-7 w-7" />
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

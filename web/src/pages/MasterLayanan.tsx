@@ -25,13 +25,25 @@ export default function MasterLayanan() {
   const [products, setProducts] = useState<Product[]>([]);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Service | null>(null);
-  const [form, setForm] = useState<{ kode: string; nama: string; harga: string; compliments: Array<{ kode: string; qty: number }> }>({
+  const [form, setForm] = useState<{
+    kode: string;
+    nama: string;
+    harga: string;
+    type_komisi: "persentase" | "rupiah";
+    nilai_komisi: string;
+    compliments: Array<{ kode: string; qty: number }>;
+  }>({
     kode: "",
     nama: "",
     harga: "",
+    type_komisi: "persentase",
+    nilai_komisi: "0",
     compliments: [],
   });
   const [deleteTarget, setDeleteTarget] = useState<Service | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [bulkCommissionType, setBulkCommissionType] = useState<"persentase" | "rupiah">("persentase");
+  const [bulkCommissionValue, setBulkCommissionValue] = useState("0");
   const formatRupiahInput = (value: string) => {
     const digits = value.replace(/\D/g, "");
     if (!digits) return "";
@@ -79,6 +91,8 @@ export default function MasterLayanan() {
       kode: form.kode,
       nama: form.nama,
       harga: Number(form.harga),
+      type_komisi: form.type_komisi,
+      nilai_komisi: Number(form.nilai_komisi || "0"),
       compliments: Array.from(complimentsMap.entries()).map(([kode, qty]) => ({ kode, qty })),
     };
 
@@ -91,7 +105,7 @@ export default function MasterLayanan() {
         toast({ title: "Berhasil", description: "Layanan baru ditambahkan" });
       }
       await loadServices();
-      setForm({ kode: "", nama: "", harga: "", compliments: [] });
+      setForm({ kode: "", nama: "", harga: "", type_komisi: "persentase", nilai_komisi: "0", compliments: [] });
       setEditing(null);
       setOpen(false);
     } catch (error) {
@@ -125,14 +139,56 @@ export default function MasterLayanan() {
 
   const openEdit = (l: Service) => {
     setEditing(l);
-    setForm({ kode: l.kode, nama: l.nama, harga: String(l.harga), compliments: l.compliments || [] });
+    setForm({
+      kode: l.kode,
+      nama: l.nama,
+      harga: String(l.harga),
+      type_komisi: l.type_komisi || "persentase",
+      nilai_komisi: String(l.nilai_komisi ?? 0),
+      compliments: l.compliments || [],
+    });
     setOpen(true);
   };
 
   const openAdd = () => {
     setEditing(null);
-    setForm({ kode: "", nama: "", harga: "", compliments: [] });
+    setForm({ kode: "", nama: "", harga: "", type_komisi: "persentase", nilai_komisi: "0", compliments: [] });
     setOpen(true);
+  };
+
+  const toggleSelectRow = (id: string) => {
+    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.length === data.length) {
+      setSelectedIds([]);
+      return;
+    }
+    setSelectedIds(data.map((r) => r.id));
+  };
+
+  const handleBulkApply = async () => {
+    if (selectedIds.length === 0) {
+      toast({ title: "Pilih data dulu", description: "Centang minimal satu layanan.", variant: "destructive" });
+      return;
+    }
+    try {
+      await api.bulkUpdateServiceCommission({
+        ids: selectedIds,
+        type_komisi: bulkCommissionType,
+        nilai_komisi: Number(bulkCommissionValue || "0"),
+      });
+      await loadServices();
+      toast({ title: "Berhasil", description: `Komisi diterapkan ke ${selectedIds.length} layanan` });
+      setSelectedIds([]);
+    } catch (error) {
+      toast({
+        title: "Gagal bulk update",
+        description: error instanceof Error ? error.message : "Terjadi kesalahan",
+        variant: "destructive",
+      });
+    }
   };
 
   const formatRp = (n: number) => new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(n);
@@ -150,14 +206,14 @@ export default function MasterLayanan() {
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
             <Button onClick={openAdd} className="bg-accent text-accent-foreground hover:bg-accent/90">
-              <Plus className="w-4 h-4 mr-2" /> Tambah Layanan
+              <Plus className="mr-2 h-4 w-4" /> Tambah Layanan
             </Button>
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
               <DialogTitle className="font-display">{editing ? "Edit Layanan" : "Tambah Layanan"}</DialogTitle>
             </DialogHeader>
-            <div className="space-y-4 mt-2">
+            <div className="mt-2 space-y-4">
               <div className="space-y-2">
                 <Label>Kode Layanan</Label>
                 <Input value={form.kode} onChange={(e) => setForm({ ...form, kode: e.target.value })} disabled={!!editing} />
@@ -175,12 +231,34 @@ export default function MasterLayanan() {
                   onChange={(e) => setForm({ ...form, harga: sanitizeRupiahInput(e.target.value) })}
                 />
               </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label>Tipe Komisi</Label>
+                  <select
+                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                    value={form.type_komisi}
+                    onChange={(e) => setForm({ ...form, type_komisi: e.target.value as "persentase" | "rupiah" })}
+                  >
+                    <option value="persentase">Persentase (%)</option>
+                    <option value="rupiah">Nominal (Rp)</option>
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <Label>{form.type_komisi === "persentase" ? "Nilai Komisi (%)" : "Nilai Komisi (Rp)"}</Label>
+                  <Input
+                    type="text"
+                    inputMode="numeric"
+                    value={form.type_komisi === "rupiah" ? formatRupiahInput(form.nilai_komisi) : form.nilai_komisi}
+                    onChange={(e) => setForm({ ...form, nilai_komisi: sanitizeRupiahInput(e.target.value) })}
+                  />
+                </div>
+              </div>
               <div className="space-y-2">
                 <Label>Compliment (Produk)</Label>
                 {products.length === 0 ? (
                   <p className="text-xs text-muted-foreground">Master produk belum ada / tidak bisa dimuat.</p>
                 ) : (
-                  <ScrollArea className="h-40 rounded-md border border-border/50 p-2">
+                  <ScrollArea className="border-border-/50 h-40 rounded-md border p-2">
                     <div className="space-y-2">
                       {products.map((p) => {
                         const selected = (form.compliments || []).find((c) => c.kode === p.kode);
@@ -227,17 +305,53 @@ export default function MasterLayanan() {
         </Dialog>
       </PageHeader>
 
-      <Card className="border-border/50">
+      <Card className="border-border-/50">
         <CardContent className="p-5">
+          <div className="border-border-/60 mb-4 rounded-lg border p-3">
+            <div className="mb-2 text-sm font-medium">Edit Komisi</div>
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-4">
+              <select
+                className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                value={bulkCommissionType}
+                onChange={(e) => setBulkCommissionType(e.target.value as "persentase" | "rupiah")}
+              >
+                <option value="persentase">Persentase (%)</option>
+                <option value="rupiah">Nominal (Rp)</option>
+              </select>
+              <Input
+                value={bulkCommissionType === "rupiah" ? formatRupiahInput(bulkCommissionValue) : bulkCommissionValue}
+                inputMode="numeric"
+                onChange={(e) => setBulkCommissionValue(sanitizeRupiahInput(e.target.value))}
+                placeholder={bulkCommissionType === "persentase" ? "Contoh: 10" : "Contoh: 20.000"}
+              />
+              <Button variant="outline" onClick={toggleSelectAll}>
+                {selectedIds.length === data.length && data.length > 0 ? "Batal Pilih Semua" : "Pilih Semua"}
+              </Button>
+              <Button onClick={handleBulkApply} className="bg-accent text-accent-foreground hover:bg-accent/90">
+                Terapkan ({selectedIds.length})
+              </Button>
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Gunakan ini untuk set komisi massal, lalu ubah per layanan jika ada pengecualian.
+            </p>
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b text-left text-muted-foreground">
-                  <th className="pb-3 font-medium w-10"></th>
-                  <th className="pb-3 font-medium w-32">Kode</th>
-                  <th className="pb-3 font-medium min-w-[240px]">Nama Layanan</th>
-                  <th className="pb-3 font-medium text-right w-40">Harga</th>
-                  <th className="pb-3 font-medium text-right w-28">Aksi</th>
+                  <th className="w-10 pb-3 font-medium">
+                    <input
+                      type="checkbox"
+                      checked={data.length > 0 && selectedIds.length === data.length}
+                      onChange={toggleSelectAll}
+                    />
+                  </th>
+                  <th className="w-10 pb-3 font-medium"></th>
+                  <th className="w-32 pb-3 font-medium">Kode</th>
+                  <th className="min-w-[240px] pb-3 font-medium">Nama Layanan</th>
+                  <th className="w-40 pb-3 text-right font-medium">Harga</th>
+                  <th className="w-40 pb-3 text-right font-medium">Komisi</th>
+                  <th className="w-28 pb-3 text-right font-medium">Aksi</th>
                 </tr>
               </thead>
               <tbody>
@@ -254,6 +368,9 @@ export default function MasterLayanan() {
                     <Fragment key={l.id}>
                       <tr className="border-b last:border-0">
                         <td className="py-2 text-center align-top">
+                          <input type="checkbox" checked={selectedIds.includes(l.id)} onChange={() => toggleSelectRow(l.id)} />
+                        </td>
+                        <td className="py-2 text-center align-top">
                           <Button
                             variant="ghost"
                             size="icon"
@@ -261,31 +378,36 @@ export default function MasterLayanan() {
                             onClick={() => handleExpand(l.id)}
                             className="text-accent"
                           >
-                            {isOpen ? <MinusCircle className="w-5 h-5" /> : <PlusCircle className="w-5 h-5" />}
+                            {isOpen ? <MinusCircle className="h-5 w-5" /> : <PlusCircle className="h-5 w-5" />}
                           </Button>
                         </td>
-                        <td className="py-2 font-medium align-top">{l.kode}</td>
+                        <td className="py-2 align-top font-medium">{l.kode}</td>
                         <td className="py-2 align-top">{l.nama}</td>
                         <td className="py-2 text-right align-top tabular-nums">{formatRp(l.harga)}</td>
+                        <td className="py-2 text-right align-top tabular-nums">
+                          {l.type_komisi === "rupiah"
+                            ? formatRp(Number(l.nilai_komisi || 0))
+                            : `${Number(l.nilai_komisi || 0)}%`}
+                        </td>
                         <td className="py-2 text-right align-top">
                           <div className="flex items-center justify-end gap-1">
                             <Button variant="ghost" size="icon" onClick={() => openEdit(l)}>
-                              <Pencil className="w-4 h-4" />
+                              <Pencil className="h-4 w-4" />
                             </Button>
                             <Button variant="ghost" size="icon" onClick={() => setDeleteTarget(l)}>
-                              <Trash2 className="w-4 h-4 text-destructive" />
+                              <Trash2 className="h-4 w-4 text-destructive" />
                             </Button>
                           </div>
                         </td>
                       </tr>
 
                       {isOpen && (
-                        <tr className="border-b last:border-0 bg-muted/40">
-                          <td colSpan={5} className="p-0">
+                        <tr className="border-b bg-muted/40 last:border-0">
+                          <td colSpan={7} className="p-0">
                             <div className="px-4 py-3">
                               <div className="text-sm font-semibold">Compliment Produk:</div>
                               {complimentLines.length > 0 ? (
-                                <div className="mt-1 text-sm whitespace-pre-line">{complimentLines.join("\n")}</div>
+                                <div className="mt-1 whitespace-pre-line text-sm">{complimentLines.join("\n")}</div>
                               ) : (
                                 <div className="mt-1 text-xs text-muted-foreground">Tidak ada compliment.</div>
                               )}
@@ -298,7 +420,7 @@ export default function MasterLayanan() {
                 })}
                 {data.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="py-6 text-center text-muted-foreground">
+                    <td colSpan={7} className="py-6 text-center text-muted-foreground">
                       Belum ada data layanan.
                     </td>
                   </tr>

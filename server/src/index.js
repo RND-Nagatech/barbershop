@@ -14,6 +14,8 @@ import cors from "cors";
 import morgan from "morgan";
 import mongoose from "mongoose";
 import crypto from "crypto";
+import fs from "fs/promises";
+import path from "path";
 import { waGateway } from "./waGateway.js";
 import { buildReceiptPdf, buildTicketPdf } from "./pdfUtils.js";
 
@@ -30,6 +32,8 @@ const port = Number(process.env.PORT || 3001);
 const mongoUri = process.env.MONGODB_URI;
 const jwtSecret = process.env.JWT_SECRET || "dev-secret-change-me";
 const webPublicBaseUrl = process.env.WEB_PUBLIC_BASE_URL || "http://localhost:8080";
+const uploadsRootDir = path.resolve(process.cwd(), "uploads");
+const haircutUploadsDir = path.join(uploadsRootDir, "haircut-photos");
 
 if (!mongoUri) {
   throw new Error("MONGODB_URI is required in environment variables");
@@ -47,8 +51,9 @@ app.use(
     origin: '*',
   }),
 );
-app.use(express.json());
+app.use(express.json({ limit: "8mb" }));
 app.use(morgan("dev"));
+app.use("/uploads", express.static(uploadsRootDir));
 
 const base64UrlEncode = (input) =>
   Buffer.from(input)
@@ -148,11 +153,35 @@ const serviceComplimentSchema = new mongoose.Schema(
   { _id: false },
 );
 
+const haircutPhotoSetSchema = new mongoose.Schema(
+  {
+    front: { type: String, default: "" },
+    left: { type: String, default: "" },
+    right: { type: String, default: "" },
+    back: { type: String, default: "" },
+    updatedAt: { type: Date },
+  },
+  { _id: false },
+);
+
+const bookingFotoSetSchema = new mongoose.Schema(
+  {
+    depan: { type: String, default: "" },
+    kiri: { type: String, default: "" },
+    kanan: { type: String, default: "" },
+    belakang: { type: String, default: "" },
+    updatedAt: { type: Date },
+  },
+  { _id: false },
+);
+
 const serviceSchema = new mongoose.Schema(
   {
     kode: { type: String, required: true, unique: true, trim: true },
     nama: { type: String, required: true, trim: true },
     harga: { type: Number, required: true, min: 0 },
+    type_komisi: { type: String, enum: ["persentase", "rupiah"], default: "persentase" },
+    nilai_komisi: { type: Number, default: 0, min: 0 },
     compliments: { type: [serviceComplimentSchema], default: [] },
   },
   { timestamps: true },
@@ -165,6 +194,8 @@ const productSchema = new mongoose.Schema(
     harga: { type: Number, required: true, min: 0 },
     stok: { type: Number, default: 0, min: 0 },
     minStok: { type: Number, default: 0, min: 0 },
+    type_komisi: { type: String, enum: ["persentase", "rupiah"], default: "persentase" },
+    nilai_komisi: { type: Number, default: 0, min: 0 },
   },
   { timestamps: true },
 );
@@ -224,6 +255,7 @@ const customerSchema = new mongoose.Schema(
     pointsBalance: { type: Number, default: 0, min: 0 },
     visitCount: { type: Number, default: 0, min: 0 },
     lastVisitAt: { type: Date },
+    lastHaircutPhotos: { type: haircutPhotoSetSchema, default: () => ({}) },
   },
   { timestamps: true },
 );
@@ -291,6 +323,9 @@ const saleItemSchema = new mongoose.Schema(
     harga: { type: Number, required: true, min: 0 },
     qty: { type: Number, required: true, min: 1 },
     isCompliment: { type: Boolean, default: false },
+    type_komisi: { type: String, enum: ["persentase", "rupiah"], default: "persentase" },
+    nilai_komisi: { type: Number, default: 0, min: 0 },
+    komisi_didapat: { type: Number, default: 0, min: 0 },
   },
   { _id: false },
 );
@@ -318,7 +353,7 @@ const saleSchema = new mongoose.Schema(
     alasan_void: { type: String, trim: true, default: "" },
     dibatalkan_oleh: { type: String, trim: true, default: "" },
     poin_didapat: { type: Number, default: 0, min: 0 },
-    tipe_komisi: { type: String, enum: ["persentase", "rupiah"], default: "persentase" },
+    tipe_komisi: { type: String, enum: ["persentase", "rupiah", "itemized"], default: "itemized" },
     nilai_komisi: { type: Number, default: 0, min: 0 },
     komisi_didapat: { type: Number, default: 0, min: 0 },
     token_bagi: { type: String, trim: true },
@@ -431,6 +466,7 @@ const bookingSchema = new mongoose.Schema(
     status_bayar: { type: String, enum: ["Unpaid", "Paid"], default: "Unpaid" },
     tgl_bayar: { type: Date },
     tgl_byr: { type: String, trim: true, default: "" },
+    foto: { type: [bookingFotoSetSchema], default: [] },
   },
   { timestamps: true },
 );
@@ -558,6 +594,120 @@ const sumBookingProductTotal = (booking) => {
   }, 0);
 };
 
+const normalizeTypeKomisi = (value) => (String(value || "").toLowerCase() === "rupiah" ? "rupiah" : "persentase");
+const normalizeNilaiKomisi = (value) => {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num < 0) return 0;
+  return num;
+};
+const computeItemKomisi = ({ qty, harga, type_komisi, nilai_komisi }) => {
+  const safeQty = Math.max(1, Math.floor(Number(qty) || 1));
+  const safeHarga = Math.max(0, Number(harga) || 0);
+  const safeValue = normalizeNilaiKomisi(nilai_komisi);
+  if (normalizeTypeKomisi(type_komisi) === "rupiah") {
+    return Math.max(0, Math.round(safeValue * safeQty));
+  }
+  return Math.max(0, Math.round((safeHarga * safeValue * safeQty) / 100));
+};
+
+const parseUploadsPathname = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (raw.startsWith("/uploads/")) return raw;
+  if (/^https?:\/\//i.test(raw)) {
+    try {
+      const pathname = new URL(raw).pathname || "";
+      if (pathname.startsWith("/uploads/")) return pathname;
+    } catch {
+      return "";
+    }
+  }
+  return "";
+};
+
+const toSafeUploadFilePath = (uploadsPathname) => {
+  const relative = String(uploadsPathname || "").replace(/^\/uploads\//, "");
+  const abs = path.resolve(uploadsRootDir, relative);
+  if (!abs.startsWith(uploadsRootDir)) return "";
+  return abs;
+};
+
+const deleteLocalUploadIfExists = async (value) => {
+  const pathname = parseUploadsPathname(value);
+  if (!pathname) return;
+  const abs = toSafeUploadFilePath(pathname);
+  if (!abs) return;
+  await fs.rm(abs, { force: true }).catch(() => {});
+};
+
+const saveHaircutDataUrlToFile = async ({ dataUrl }) => {
+  const match = String(dataUrl || "").match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,([\s\S]+)$/);
+  if (!match) throw new Error("Format foto tidak valid. Gunakan gambar yang benar.");
+  const mimeType = match[1];
+  const base64Body = match[2];
+  const buffer = Buffer.from(base64Body, "base64");
+  const maxBytes = 5 * 1024 * 1024;
+  if (buffer.byteLength > maxBytes) {
+    throw new Error("Ukuran foto terlalu besar. Maksimal 5MB per foto.");
+  }
+  const extByMime = {
+    "image/jpeg": "jpg",
+    "image/jpg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp",
+    "image/gif": "gif",
+  };
+  const ext = extByMime[mimeType] || "jpg";
+  const fileName = `${Date.now()}-${crypto.randomBytes(6).toString("hex")}.${ext}`;
+  const absPath = path.join(haircutUploadsDir, fileName);
+  await fs.writeFile(absPath, buffer);
+  return `/uploads/haircut-photos/${fileName}`;
+};
+
+const emptyBookingFotoSet = () => ({
+  depan: "",
+  kiri: "",
+  kanan: "",
+  belakang: "",
+  updatedAt: undefined,
+});
+
+const normalizeBookingFotoSet = (value = {}) => ({
+  depan: String(value?.depan || "").trim(),
+  kiri: String(value?.kiri || "").trim(),
+  kanan: String(value?.kanan || "").trim(),
+  belakang: String(value?.belakang || "").trim(),
+  updatedAt: value?.updatedAt,
+});
+
+const legacyHaircutToBookingFotoSet = (value = {}) => ({
+  depan: String(value?.depan || value?.front || "").trim(),
+  kiri: String(value?.kiri || value?.left || "").trim(),
+  kanan: String(value?.kanan || value?.right || "").trim(),
+  belakang: String(value?.belakang || value?.back || "").trim(),
+  updatedAt: value?.updatedAt,
+});
+
+const bookingFotoSetToLegacyHaircut = (value = {}) => ({
+  front: String(value?.depan || "").trim(),
+  left: String(value?.kiri || "").trim(),
+  right: String(value?.kanan || "").trim(),
+  back: String(value?.belakang || "").trim(),
+  updatedAt: value?.updatedAt,
+});
+
+const normalizeBookingFotoArray = (value) => {
+  const list = Array.isArray(value) ? value : [];
+  return list.map((item) => normalizeBookingFotoSet(item));
+};
+
+const getLatestBookingFotoSet = (booking = {}) => {
+  const fotoArr = normalizeBookingFotoArray(booking?.foto);
+  if (fotoArr.length > 0) return { ...emptyBookingFotoSet(), ...fotoArr[0] };
+  if (booking?.haircutPhotos) return { ...emptyBookingFotoSet(), ...legacyHaircutToBookingFotoSet(booking.haircutPhotos) };
+  return emptyBookingFotoSet();
+};
+
 const buildStockMovementDoc = ({ product, delta, reason, refSaleId, refBookingCode, ymd }) => ({
   productId: product?._id,
   kode: product?.kode || "",
@@ -588,7 +738,7 @@ const computePointsEarned = ({ total, setting }) => {
   return Math.floor(safeTotal / rupiahStep) * pointsPerStep;
 };
 
-const computeCommissionEarned = ({ total, setting }) => {
+const computeKomisiDidapat = ({ total, setting }) => {
   const safeTotal = Math.max(0, Number(total) || 0);
   const tipe = setting?.tipe;
   const nilai = Number(setting?.nilai || 0);
@@ -773,20 +923,62 @@ app.delete(
   }),
 );
 
+const mapServiceResponse = (row) => ({
+  id: String(row._id),
+  kode: row.kode,
+  nama: row.nama,
+  harga: row.harga,
+  type_komisi: normalizeTypeKomisi(row.type_komisi),
+  nilai_komisi: normalizeNilaiKomisi(row.nilai_komisi),
+  compliments: Array.isArray(row.compliments) ? row.compliments : [],
+});
+
+const buildServicePayload = (body = {}) => ({
+  kode: body.kode,
+  nama: body.nama,
+  harga: Number(body.harga),
+  type_komisi: normalizeTypeKomisi(body.type_komisi),
+  nilai_komisi: normalizeNilaiKomisi(body.nilai_komisi),
+  compliments: Array.isArray(body.compliments) ? body.compliments : [],
+});
+
+const mapProductResponse = (row) => ({
+  id: String(row._id),
+  kode: row.kode,
+  nama: row.nama,
+  harga: row.harga,
+  stok: row.stok,
+  minStok: row.minStok ?? 0,
+  type_komisi: normalizeTypeKomisi(row.type_komisi),
+  nilai_komisi: normalizeNilaiKomisi(row.nilai_komisi),
+});
+
+const buildProductPayload = (body = {}, { includeStock = true } = {}) => ({
+  ...(body.kode !== undefined ? { kode: body.kode } : {}),
+  ...(body.nama !== undefined ? { nama: body.nama } : {}),
+  ...(body.harga !== undefined ? { harga: Number(body.harga) } : {}),
+  ...(includeStock && body.stok !== undefined ? { stok: Number(body.stok) } : {}),
+  ...(includeStock && body.minStok !== undefined ? { minStok: Number(body.minStok) } : {}),
+  ...(body.type_komisi !== undefined ? { type_komisi: normalizeTypeKomisi(body.type_komisi) } : {}),
+  ...(body.nilai_komisi !== undefined ? { nilai_komisi: normalizeNilaiKomisi(body.nilai_komisi) } : {}),
+});
+
+const parseBulkIds = (ids = []) =>
+  Array.from(
+    new Set(
+      (Array.isArray(ids) ? ids : [])
+        .map((id) => toObjectId(id))
+        .filter(Boolean)
+        .map((id) => String(id)),
+    ),
+  ).map((id) => new mongoose.Types.ObjectId(id));
+
 
 app.get(
   "/api/layanan",
   asyncHandler(async (_, res) => {
     const rows = await Service.find().sort({ createdAt: -1 }).lean();
-    res.json(
-      rows.map((r) => ({
-        id: String(r._id),
-        kode: r.kode,
-        nama: r.nama,
-        harga: r.harga,
-        compliments: Array.isArray(r.compliments) ? r.compliments : [],
-      })),
-    );
+    res.json(rows.map(mapServiceResponse));
   }),
 );
 
@@ -794,29 +986,15 @@ app.get(
   "/api/services",
   asyncHandler(async (_req, res) => {
     const rows = await Service.find().sort({ createdAt: -1 }).lean();
-    res.json(
-      rows.map((r) => ({
-        id: String(r._id),
-        kode: r.kode,
-        nama: r.nama,
-        harga: r.harga,
-        compliments: Array.isArray(r.compliments) ? r.compliments : [],
-      })),
-    );
+    res.json(rows.map(mapServiceResponse));
   }),
 );
 app.post(
   "/api/services",
   requireLevels("Owner", "Admin"),
   asyncHandler(async (req, res) => {
-    const created = await Service.create(req.body);
-    res.status(201).json({
-      id: String(created._id),
-      kode: created.kode,
-      nama: created.nama,
-      harga: created.harga,
-      compliments: Array.isArray(created.compliments) ? created.compliments : [],
-    });
+    const created = await Service.create(buildServicePayload(req.body || {}));
+    res.status(201).json(mapServiceResponse(created));
   }),
 );
 app.put(
@@ -825,15 +1003,23 @@ app.put(
   asyncHandler(async (req, res) => {
     const _id = toObjectId(req.params.id);
     if (!_id) return res.status(400).json({ message: "ID tidak valid" });
-    const updated = await Service.findByIdAndUpdate(_id, req.body, { new: true, runValidators: true }).lean();
+    const updated = await Service.findByIdAndUpdate(_id, buildServicePayload(req.body || {}), { new: true, runValidators: true }).lean();
     if (!updated) return res.status(404).json({ message: "Data tidak ditemukan" });
-    res.json({
-      id: String(updated._id),
-      kode: updated.kode,
-      nama: updated.nama,
-      harga: updated.harga,
-      compliments: Array.isArray(updated.compliments) ? updated.compliments : [],
-    });
+    res.json(mapServiceResponse(updated));
+  }),
+);
+app.patch(
+  "/api/services/commission/bulk",
+  requireLevels("Owner", "Admin"),
+  asyncHandler(async (req, res) => {
+    const ids = parseBulkIds(req.body?.ids || []);
+    if (ids.length === 0) return res.status(400).json({ message: "Pilih minimal satu layanan" });
+    const payload = {
+      type_komisi: normalizeTypeKomisi(req.body?.type_komisi),
+      nilai_komisi: normalizeNilaiKomisi(req.body?.nilai_komisi),
+    };
+    const result = await Service.updateMany({ _id: { $in: ids } }, { $set: payload });
+    res.json({ matchedCount: result.matchedCount || 0, modifiedCount: result.modifiedCount || 0, ...payload });
   }),
 );
 app.delete(
@@ -853,14 +1039,8 @@ app.post(
   "/api/layanan",
   requireLevels("Owner", "Admin"),
   asyncHandler(async (req, res) => {
-    const created = await Service.create(req.body);
-    res.status(201).json({
-      id: String(created._id),
-      kode: created.kode,
-      nama: created.nama,
-      harga: created.harga,
-      compliments: Array.isArray(created.compliments) ? created.compliments : [],
-    });
+    const created = await Service.create(buildServicePayload(req.body || {}));
+    res.status(201).json(mapServiceResponse(created));
   }),
 );
 
@@ -870,15 +1050,23 @@ app.put(
   asyncHandler(async (req, res) => {
     const _id = toObjectId(req.params.id);
     if (!_id) return res.status(400).json({ message: "ID tidak valid" });
-    const updated = await Service.findByIdAndUpdate(_id, req.body, { new: true, runValidators: true }).lean();
+    const updated = await Service.findByIdAndUpdate(_id, buildServicePayload(req.body || {}), { new: true, runValidators: true }).lean();
     if (!updated) return res.status(404).json({ message: "Data tidak ditemukan" });
-    res.json({
-      id: String(updated._id),
-      kode: updated.kode,
-      nama: updated.nama,
-      harga: updated.harga,
-      compliments: Array.isArray(updated.compliments) ? updated.compliments : [],
-    });
+    res.json(mapServiceResponse(updated));
+  }),
+);
+app.patch(
+  "/api/layanan/commission/bulk",
+  requireLevels("Owner", "Admin"),
+  asyncHandler(async (req, res) => {
+    const ids = parseBulkIds(req.body?.ids || []);
+    if (ids.length === 0) return res.status(400).json({ message: "Pilih minimal satu layanan" });
+    const payload = {
+      type_komisi: normalizeTypeKomisi(req.body?.type_komisi),
+      nilai_komisi: normalizeNilaiKomisi(req.body?.nilai_komisi),
+    };
+    const result = await Service.updateMany({ _id: { $in: ids } }, { $set: payload });
+    res.json({ matchedCount: result.matchedCount || 0, modifiedCount: result.modifiedCount || 0, ...payload });
   }),
 );
 
@@ -899,7 +1087,7 @@ app.get(
   requireLevels("Owner", "Admin", "Kasir", "Pegawai"),
   asyncHandler(async (_, res) => {
     const rows = await Product.find().sort({ createdAt: -1 }).lean();
-    res.json(rows.map((r) => ({ id: String(r._id), kode: r.kode, nama: r.nama, harga: r.harga, stok: r.stok, minStok: r.minStok ?? 0 })));
+    res.json(rows.map(mapProductResponse));
   }),
 );
 
@@ -908,7 +1096,7 @@ app.get(
   requireLevels("Owner", "Admin", "Kasir", "Pegawai"),
   asyncHandler(async (_req, res) => {
     const rows = await Product.find().sort({ createdAt: -1 }).lean();
-    res.json(rows.map((r) => ({ id: String(r._id), kode: r.kode, nama: r.nama, harga: r.harga, stok: r.stok, minStok: r.minStok ?? 0 })));
+    res.json(rows.map(mapProductResponse));
   }),
 );
 
@@ -919,7 +1107,7 @@ app.get(
     const rows = await Product.find({ minStok: { $gt: 0 }, $expr: { $lte: ["$stok", "$minStok"] } })
       .sort({ stok: 1 })
       .lean();
-    res.json(rows.map((r) => ({ id: String(r._id), kode: r.kode, nama: r.nama, harga: r.harga, stok: r.stok, minStok: r.minStok ?? 0 })));
+    res.json(rows.map(mapProductResponse));
   }),
 );
 
@@ -930,7 +1118,7 @@ app.get(
     const rows = await Product.find({ minStok: { $gt: 0 }, $expr: { $lte: ["$stok", "$minStok"] } })
       .sort({ stok: 1 })
       .lean();
-    res.json(rows.map((r) => ({ id: String(r._id), kode: r.kode, nama: r.nama, harga: r.harga, stok: r.stok, minStok: r.minStok ?? 0 })));
+    res.json(rows.map(mapProductResponse));
   }),
 );
 
@@ -938,8 +1126,8 @@ app.post(
   "/api/produk",
   requireLevels("Owner", "Admin"),
   asyncHandler(async (req, res) => {
-    const created = await Product.create(req.body);
-    res.status(201).json({ id: String(created._id), kode: created.kode, nama: created.nama, harga: created.harga, stok: created.stok, minStok: created.minStok ?? 0 });
+    const created = await Product.create(buildProductPayload(req.body || {}));
+    res.status(201).json(mapProductResponse(created));
   }),
 );
 
@@ -947,8 +1135,8 @@ app.post(
   "/api/products",
   requireLevels("Owner", "Admin"),
   asyncHandler(async (req, res) => {
-    const created = await Product.create(req.body);
-    res.status(201).json({ id: String(created._id), kode: created.kode, nama: created.nama, harga: created.harga, stok: created.stok, minStok: created.minStok ?? 0 });
+    const created = await Product.create(buildProductPayload(req.body || {}));
+    res.status(201).json(mapProductResponse(created));
   }),
 );
 
@@ -958,9 +1146,9 @@ app.put(
   asyncHandler(async (req, res) => {
     const _id = toObjectId(req.params.id);
     if (!_id) return res.status(400).json({ message: "ID tidak valid" });
-    const updated = await Product.findByIdAndUpdate(_id, req.body, { new: true, runValidators: true }).lean();
+    const updated = await Product.findByIdAndUpdate(_id, buildProductPayload(req.body || {}), { new: true, runValidators: true }).lean();
     if (!updated) return res.status(404).json({ message: "Data tidak ditemukan" });
-    res.json({ id: String(updated._id), kode: updated.kode, nama: updated.nama, harga: updated.harga, stok: updated.stok, minStok: updated.minStok ?? 0 });
+    res.json(mapProductResponse(updated));
   }),
 );
 
@@ -970,9 +1158,37 @@ app.put(
   asyncHandler(async (req, res) => {
     const _id = toObjectId(req.params.id);
     if (!_id) return res.status(400).json({ message: "ID tidak valid" });
-    const updated = await Product.findByIdAndUpdate(_id, req.body, { new: true, runValidators: true }).lean();
+    const updated = await Product.findByIdAndUpdate(_id, buildProductPayload(req.body || {}), { new: true, runValidators: true }).lean();
     if (!updated) return res.status(404).json({ message: "Data tidak ditemukan" });
-    res.json({ id: String(updated._id), kode: updated.kode, nama: updated.nama, harga: updated.harga, stok: updated.stok, minStok: updated.minStok ?? 0 });
+    res.json(mapProductResponse(updated));
+  }),
+);
+app.patch(
+  "/api/products/commission/bulk",
+  requireLevels("Owner", "Admin"),
+  asyncHandler(async (req, res) => {
+    const ids = parseBulkIds(req.body?.ids || []);
+    if (ids.length === 0) return res.status(400).json({ message: "Pilih minimal satu produk" });
+    const payload = {
+      type_komisi: normalizeTypeKomisi(req.body?.type_komisi),
+      nilai_komisi: normalizeNilaiKomisi(req.body?.nilai_komisi),
+    };
+    const result = await Product.updateMany({ _id: { $in: ids } }, { $set: payload });
+    res.json({ matchedCount: result.matchedCount || 0, modifiedCount: result.modifiedCount || 0, ...payload });
+  }),
+);
+app.patch(
+  "/api/produk/commission/bulk",
+  requireLevels("Owner", "Admin"),
+  asyncHandler(async (req, res) => {
+    const ids = parseBulkIds(req.body?.ids || []);
+    if (ids.length === 0) return res.status(400).json({ message: "Pilih minimal satu produk" });
+    const payload = {
+      type_komisi: normalizeTypeKomisi(req.body?.type_komisi),
+      nilai_komisi: normalizeNilaiKomisi(req.body?.nilai_komisi),
+    };
+    const result = await Product.updateMany({ _id: { $in: ids } }, { $set: payload });
+    res.json({ matchedCount: result.matchedCount || 0, modifiedCount: result.modifiedCount || 0, ...payload });
   }),
 );
 
@@ -995,7 +1211,7 @@ app.patch(
 
     await StockMovement.create(buildStockMovementDoc({ product: updated, delta, reason: "adjust", ymd }));
 
-    res.json({ id: String(updated._id), kode: updated.kode, nama: updated.nama, harga: updated.harga, stok: updated.stok, minStok: updated.minStok ?? 0 });
+    res.json(mapProductResponse(updated));
   }),
 );
 
@@ -1017,7 +1233,7 @@ app.patch(
     if (!updated) return res.status(400).json({ message: "Stok tidak cukup" });
 
     await StockMovement.create(buildStockMovementDoc({ product: updated, delta, reason: "adjust", ymd }));
-    res.json({ id: String(updated._id), kode: updated.kode, nama: updated.nama, harga: updated.harga, stok: updated.stok, minStok: updated.minStok ?? 0 });
+    res.json(mapProductResponse(updated));
   }),
 );
 
@@ -1282,7 +1498,7 @@ app.post(
       tgl_byr: paidYmd,
       status: "Paid",
       poin_didapat: pointsEarned,
-      tipe_komisi: "persentase",
+      tipe_komisi: "itemized",
       nilai_komisi: 0,
       komisi_didapat: 0,
     };
@@ -2273,6 +2489,7 @@ app.get(
         createdAt: r.createdAt,
         paymentStatus: r.status_bayar || "Unpaid",
         paidAt: r.tgl_bayar,
+        foto: normalizeBookingFotoArray(r.foto).length > 0 ? normalizeBookingFotoArray(r.foto) : [getLatestBookingFotoSet(r)],
       })),
     );
   }),
@@ -2317,6 +2534,44 @@ app.get(
         paidAt: r.tgl_bayar,
       })),
     );
+  }),
+);
+
+app.get(
+  "/api/bookings/by-code/:code/haircut-photos",
+  requireLevels("Owner", "Admin", "Kasir", "Pegawai"),
+  asyncHandler(async (req, res) => {
+    const bookingCode = String(req.params.code || "").trim();
+    if (!bookingCode) return res.status(400).json({ message: "Kode booking tidak valid" });
+    const booking = await Booking.findOne({ kode_booking: bookingCode })
+      .select("kode_booking foto haircutPhotos id_pelanggan no_hp nama_pelanggan")
+      .lean();
+    if (!booking) return res.status(404).json({ message: "Booking tidak ditemukan" });
+
+    const emptyFoto = emptyBookingFotoSet();
+    let customer = null;
+    if (booking.id_pelanggan) {
+      customer = await Customer.findById(booking.id_pelanggan).select("lastHaircutPhotos").lean();
+    } else {
+      const phone = normalizePhone(booking.no_hp || "");
+      if (phone) {
+        customer = await Customer.findOne({ phone }).select("lastHaircutPhotos").lean();
+      }
+    }
+    const bookingPhotos = getLatestBookingFotoSet(booking);
+    const customerPhotos = customer?.lastHaircutPhotos || {};
+    const merged = {
+      depan: bookingPhotos.depan || customerPhotos.front || "",
+      kiri: bookingPhotos.kiri || customerPhotos.left || "",
+      kanan: bookingPhotos.kanan || customerPhotos.right || "",
+      belakang: bookingPhotos.belakang || customerPhotos.back || "",
+      updatedAt: bookingPhotos.updatedAt || customerPhotos.updatedAt || undefined,
+    };
+
+    res.json({
+      bookingCode: booking.kode_booking,
+      foto: [{ ...emptyFoto, ...merged }],
+    });
   }),
 );
 
@@ -2422,6 +2677,7 @@ app.post(
     }
 
     const kode_booking = formatBookingCode({ queueDate, antrian });
+    const selectedEmployee = String(req.body.employeeName || "").trim();
     const payload = {
       kode_booking,
       antrian,
@@ -2429,12 +2685,12 @@ app.post(
       no_hp: phone || "",
       id_pelanggan,
       token_bagi: generateShareToken(),
-      nama_pegawai: req.body.employeeName || "",
+      nama_pegawai: selectedEmployee,
       id_cabang: branch?._id,
       domain_cabang: branch?.domain,
       layanan,
       produk,
-      status: "Menunggu",
+      status: selectedEmployee ? "Proses" : "Menunggu",
       tgl_sistem: queueDate,
       status_bayar: "Unpaid",
       tgl_bayar: null,
@@ -2503,6 +2759,7 @@ app.post(
       createdAt: created.createdAt,
       paymentStatus: created.status_bayar || "Unpaid",
       paidAt: created.tgl_bayar,
+      foto: normalizeBookingFotoArray(created.foto).length > 0 ? normalizeBookingFotoArray(created.foto) : [getLatestBookingFotoSet(created)],
     });
   }),
 );
@@ -2532,6 +2789,91 @@ app.patch(
     const updated = await Booking.findByIdAndUpdate(_id, { status: "Selesai" }, { new: true }).lean();
     if (!updated) return res.status(404).json({ message: "Data tidak ditemukan" });
     res.json({ id: String(updated._id), status: updated.status });
+  }),
+);
+
+app.patch(
+  "/api/bookings/:id/haircut-photos",
+  requireLevels("Owner", "Admin", "Pegawai"),
+  asyncHandler(async (req, res) => {
+    const _id = toObjectId(req.params.id);
+    if (!_id) return res.status(400).json({ message: "ID tidak valid" });
+    const booking = await Booking.findById(_id).lean();
+    if (!booking) return res.status(404).json({ message: "Data tidak ditemukan" });
+
+    const keyMap = {
+      depan: ["depan", "front"],
+      kiri: ["kiri", "left"],
+      kanan: ["kanan", "right"],
+      belakang: ["belakang", "back"],
+    };
+    const latestFoto = getLatestBookingFotoSet(booking);
+    const updates = {};
+    for (const key of Object.keys(keyMap)) {
+      const aliases = keyMap[key] || [];
+      const rawInput = aliases.find((alias) => alias in (req.body || {}));
+      if (!rawInput) continue;
+      const rawValue = String(req.body?.[rawInput] || "").trim();
+      const previousValue = String(latestFoto?.[key] || "");
+      try {
+        if (!rawValue) {
+          updates[key] = "";
+          await deleteLocalUploadIfExists(previousValue);
+          continue;
+        }
+        if (/^data:image\/[a-zA-Z0-9.+-]+;base64,/i.test(rawValue)) {
+          const uploadPathname = await saveHaircutDataUrlToFile({ dataUrl: rawValue });
+          updates[key] = uploadPathname;
+          await deleteLocalUploadIfExists(previousValue);
+          continue;
+        }
+        if (rawValue.startsWith("/uploads/")) {
+          updates[key] = rawValue;
+          continue;
+        }
+        if (/^https?:\/\//i.test(rawValue)) {
+          const maybeLocalPath = parseUploadsPathname(rawValue);
+          updates[key] = maybeLocalPath || rawValue;
+          continue;
+        }
+        return res.status(400).json({ message: "Format foto tidak valid. Gunakan URL atau upload gambar." });
+      } catch (err) {
+        return res.status(400).json({ message: err instanceof Error ? err.message : "Foto tidak valid" });
+      }
+    }
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ message: "Minimal satu foto harus diisi" });
+    }
+
+    const nextFotoSet = {
+      ...emptyBookingFotoSet(),
+      ...latestFoto,
+      ...updates,
+      updatedAt: new Date(),
+    };
+
+    let customerId = booking.id_pelanggan;
+    if (!customerId) {
+      const phone = normalizePhone(booking.no_hp || "");
+      if (phone) {
+        const customer = await upsertCustomerByPhone({ phone, name: booking.nama_pelanggan || "" });
+        customerId = customer?._id;
+      }
+    }
+
+    const setPayload = { foto: [nextFotoSet] };
+    if (customerId && !booking.id_pelanggan) setPayload.id_pelanggan = customerId;
+    await Booking.updateOne({ _id: booking._id }, { $set: setPayload });
+    if (customerId) {
+      await Customer.updateOne({ _id: customerId }, { $set: { lastHaircutPhotos: bookingFotoSetToLegacyHaircut(nextFotoSet) } });
+    }
+
+    res.json({
+      id: String(booking._id),
+      bookingCode: booking.kode_booking,
+      customerId: customerId ? String(customerId) : undefined,
+      foto: [nextFotoSet],
+    });
   }),
 );
 
@@ -2735,6 +3077,34 @@ app.post(
     }
     const customerId = customer?._id;
     const isMember = Boolean(customer?.isMember);
+    const bookingServiceCodes = Array.from(new Set((booking.layanan || []).map((s) => String(s?.kode || "").trim()).filter(Boolean)));
+    const bookingProductCodes = Array.from(new Set((booking.produk || []).map((p) => String(p?.kode || "").trim()).filter(Boolean)));
+    const [serviceMasters, productMasters] = await Promise.all([
+      bookingServiceCodes.length > 0
+        ? Service.find({ kode: { $in: bookingServiceCodes } }).select("kode type_komisi nilai_komisi").lean()
+        : [],
+      bookingProductCodes.length > 0
+        ? Product.find({ kode: { $in: bookingProductCodes } }).select("kode type_komisi nilai_komisi").lean()
+        : [],
+    ]);
+    const serviceCommissionMap = new Map(
+      serviceMasters.map((s) => [
+        s.kode,
+        {
+          type_komisi: normalizeTypeKomisi(s.type_komisi),
+          nilai_komisi: normalizeNilaiKomisi(s.nilai_komisi),
+        },
+      ]),
+    );
+    const productCommissionMap = new Map(
+      productMasters.map((p) => [
+        p.kode,
+        {
+          type_komisi: normalizeTypeKomisi(p.type_komisi),
+          nilai_komisi: normalizeNilaiKomisi(p.nilai_komisi),
+        },
+      ]),
+    );
 
     const salePayload = {
       id_booking: booking._id,
@@ -2747,22 +3117,48 @@ app.post(
       no_hp_pelanggan: booking.no_hp || "",
       token_bagi: generateShareToken(),
       item: [
-        ...(booking.layanan || []).map((s) => ({
-          type: "service",
-          kode: s.kode,
-          nama: s.nama,
-          harga: Number(s.harga) || 0,
-          qty: 1,
-          isCompliment: false,
-        })),
-        ...(booking.produk || []).map((p) => ({
-          type: "product",
-          kode: p.kode,
-          nama: p.nama,
-          harga: p.isCompliment ? 0 : Number(p.harga) || 0,
-          qty: Number(p.qty) || 1,
-          isCompliment: Boolean(p.isCompliment),
-        })),
+        ...(booking.layanan || []).map((s) => {
+          const commissionConfig = serviceCommissionMap.get(String(s?.kode || "").trim()) || {
+            type_komisi: "persentase",
+            nilai_komisi: 0,
+          };
+          const qty = 1;
+          const harga = Number(s.harga) || 0;
+          const komisi_didapat = computeItemKomisi({ qty, harga, ...commissionConfig });
+          return {
+            type: "service",
+            kode: s.kode,
+            nama: s.nama,
+            harga,
+            qty,
+            isCompliment: false,
+            type_komisi: commissionConfig.type_komisi,
+            nilai_komisi: commissionConfig.nilai_komisi,
+            komisi_didapat,
+          };
+        }),
+        ...(booking.produk || []).map((p) => {
+          const qty = Number(p.qty) || 1;
+          const harga = p.isCompliment ? 0 : Number(p.harga) || 0;
+          const commissionConfig = p.isCompliment
+            ? { type_komisi: "persentase", nilai_komisi: 0 }
+            : productCommissionMap.get(String(p?.kode || "").trim()) || {
+                type_komisi: "persentase",
+                nilai_komisi: 0,
+              };
+          const komisi_didapat = p.isCompliment ? 0 : computeItemKomisi({ qty, harga, ...commissionConfig });
+          return {
+            type: "product",
+            kode: p.kode,
+            nama: p.nama,
+            harga,
+            qty,
+            isCompliment: Boolean(p.isCompliment),
+            type_komisi: commissionConfig.type_komisi,
+            nilai_komisi: commissionConfig.nilai_komisi,
+            komisi_didapat,
+          };
+        }),
       ],
       total,
       total_diskon: 0,
@@ -2778,9 +3174,7 @@ app.post(
     // Attempt to apply stock changes and create sale atomically (transaction when possible).
     let createdSale = null;
     let pointsEarned = 0;
-    let commissionType = "persentase";
-    let commissionValue = 0;
-    let commissionEarned = 0;
+    let komisi_didapat = 0;
     const session = await mongoose.startSession({ defaultTransactionOptions: { readPreference: "primary" } });
     try {
       await session.withTransaction(async () => {
@@ -2795,17 +3189,14 @@ app.post(
         } else {
           pointsEarned = 0;
         }
-        if (salePayload.nama_pegawai) {
-          const commissionSetting = (await CommissionSetting.findOne().session(session).lean()) || { tipe: "persentase", nilai: 15 };
-          commissionType = commissionSetting.tipe;
-          commissionValue = Number(commissionSetting.nilai || 0);
-          commissionEarned = computeCommissionEarned({ total, setting: commissionSetting });
-        }
+        komisi_didapat = salePayload.nama_pegawai
+          ? (salePayload.item || []).reduce((sum, it) => sum + (Number(it.komisi_didapat) || 0), 0)
+          : 0;
 
         salePayload.poin_didapat = pointsEarned;
-        salePayload.tipe_komisi = commissionType;
-        salePayload.nilai_komisi = commissionValue;
-        salePayload.komisi_didapat = commissionEarned;
+        salePayload.tipe_komisi = "itemized";
+        salePayload.nilai_komisi = 0;
+        salePayload.komisi_didapat = komisi_didapat;
         createdSale = await Sale.create([salePayload], { session, ordered: true }).then((rows) => rows[0]);
 
         // Insert SaleLine (tt_item_transaksi)
@@ -2895,16 +3286,13 @@ app.post(
         } else {
           pointsEarned = 0;
         }
-        if (salePayload.employeeName) {
-          const commissionSetting = (await CommissionSetting.findOne().lean()) || { tipe: "persentase", nilai: 15 };
-          commissionType = commissionSetting.tipe;
-          commissionValue = Number(commissionSetting.nilai || 0);
-          commissionEarned = computeCommissionEarned({ total, setting: commissionSetting });
-        }
-        salePayload.pointsEarned = pointsEarned;
-        salePayload.commissionType = commissionType;
-        salePayload.commissionValue = commissionValue;
-        salePayload.commissionEarned = commissionEarned;
+        komisi_didapat = salePayload.nama_pegawai
+          ? (salePayload.item || []).reduce((sum, it) => sum + (Number(it.komisi_didapat) || 0), 0)
+          : 0;
+        salePayload.poin_didapat = pointsEarned;
+        salePayload.tipe_komisi = "itemized";
+        salePayload.nilai_komisi = 0;
+        salePayload.komisi_didapat = komisi_didapat;
 
         try {
           createdSale = await Sale.create(salePayload);
@@ -2913,18 +3301,18 @@ app.post(
           throw dupErr;
         }
 
-        const saleLines = (salePayload.items || []).map((it) => ({
-          saleId: createdSale._id,
-          saleCode: salePayload.saleCode || "",
-          bookingCode: salePayload.bookingCode,
-          paidAt,
-          paidYmd,
-          method: salePayload.method,
-          employeeName: salePayload.employeeName || "",
-          customerName: salePayload.customerName || "",
-          customerPhone: salePayload.customerPhone || "",
+        const saleLines = (salePayload.item || []).map((it) => ({
+          id_transaksi: createdSale._id,
+          kode_transaksi: salePayload.kode_transaksi || "",
+          kode_booking: salePayload.kode_booking || "",
+          tgl_bayar: paidAt,
+          tgl_byr: paidYmd,
+          metode: salePayload.metode || "",
+          nama_pegawai: salePayload.nama_pegawai || "",
+          nama_pelanggan: salePayload.nama_pelanggan || "",
+          no_hp_pelanggan: salePayload.no_hp_pelanggan || "",
           status: "Paid",
-          type: it.type,
+          tipe: it.type,
           kode: it.kode,
           nama: it.nama,
           harga: Number(it.harga) || 0,
@@ -2982,7 +3370,6 @@ app.post(
       salePayload.no_hp_pelanggan ||
       updated?.no_hp ||
       updated?.phone ||
-      salePayload.customerPhone ||
       updated?.customerPhone ||
       "";
 
@@ -3551,6 +3938,8 @@ app.use((err, _req, res, _next) => {
 const bootstrap = async () => {
   await mongoose.connect(mongoUri);
   console.log("MongoDB connected");
+  await fs.mkdir(haircutUploadsDir, { recursive: true });
+  console.log("Uploads directory ready:", haircutUploadsDir);
 
   const existingSetting = await CommissionSetting.findOne().lean();
   if (!existingSetting) {
