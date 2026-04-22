@@ -1,181 +1,134 @@
 # README Frontend (`web/`)
 
-Dokumen ini menjelaskan perubahan frontend terbaru untuk fitur:
-1. Komisi per layanan dan per produk.
-2. Bulk edit komisi di Master Layanan dan Master Produk.
-3. Simpan foto hasil cukur terakhir (depan, kiri, kanan, belakang).
-4. Pilih barberman saat input booking.
+Dokumen ini merangkum perubahan frontend terbaru agar sinkron dengan backend saat ini.
 
-## Ringkasan Perubahan UI
+## Ringkasan Perubahan Terbaru
 
-### 1) Master Layanan
-Halaman: `src/pages/MasterLayanan.tsx`
+1. Field komisi master layanan/produk sudah full pakai:
+- `type_komisi`
+- `nilai_komisi`
 
+2. Fitur bulk edit komisi tetap tersedia di:
+- `Master Layanan`
+- `Master Produk`
+
+3. Data foto booking berubah mengikuti backend:
+- dari `haircutPhotos` object
+- menjadi `foto` array
+
+4. Key foto yang digunakan UI sekarang:
+- `depan`, `kiri`, `kanan`, `belakang`
+
+5. Viewer foto (di Booked dan Riwayat Transaksi) tetap mendukung:
+- klik foto untuk modal preview
+- zoom in / zoom out via tombol
+
+6. Select status di halaman Booked sudah disesuaikan typing-nya agar tidak error TypeScript (`onValueChange`).
+
+## Halaman Yang Diubah
+
+## 1) `src/pages/MasterLayanan.tsx`
 Perubahan:
-- Tambah field komisi pada form layanan:
-  - `Tipe Komisi`: Persentase (%) / Nominal (Rp)
-  - `Nilai Komisi`
-- Tabel layanan sekarang menampilkan kolom `Komisi`.
-- Tambah area `Bulk Edit Komisi`:
-  - Multi-select baris layanan (checkbox)
-  - `Pilih Semua`
-  - `Terapkan (n)` ke banyak layanan sekaligus
+- Form komisi pakai `type_komisi` dan `nilai_komisi`
+- Payload create/update service pakai field baru
+- Bulk update komisi layanan pakai field baru
+- Kolom tabel komisi baca field baru
 
-API yang dipakai:
-- `GET /api/layanan`
-- `POST /api/layanan`
-- `PUT /api/layanan/:id`
-- `PATCH /api/layanan/commission/bulk`
-
-### 2) Master Produk
-Halaman: `src/pages/MasterProduk.tsx`
-
+## 2) `src/pages/MasterProduk.tsx`
 Perubahan:
-- Tambah field komisi pada form produk:
-  - `Tipe Komisi`
-  - `Nilai Komisi`
-- Tabel produk sekarang menampilkan kolom `Komisi`.
-- Tambah area `Bulk Edit Komisi` dengan pola yang sama seperti layanan.
+- Form komisi pakai `type_komisi` dan `nilai_komisi`
+- Payload create/update product pakai field baru
+- Bulk update komisi produk pakai field baru
+- Kolom tabel komisi baca field baru
 
-API yang dipakai:
-- `GET /api/produk`
-- `POST /api/produk`
-- `PUT /api/produk/:id`
-- `PATCH /api/produk/commission/bulk`
-
-### 3) Input Booking - pilih barberman
-Halaman: `src/pages/InputBooking.tsx`
-
+## 3) `src/pages/BookedList.tsx`
 Perubahan:
-- Ditambahkan dropdown `Pilih Barberman (Opsional)`.
-- Nilai barberman dikirim sebagai `employeeName` saat create booking.
+- Foto booking sekarang baca dari `booking.foto?.[0]`
+- Slot upload/preview menggunakan key:
+  - `depan`
+  - `kiri`
+  - `kanan`
+  - `belakang`
+- Indikator `Foto tersimpan: x/4` hitung dari struktur `foto` baru
+- `Select` status diperbaiki typing handler agar lolos TS
 
-Dampak alur:
-- Jika barberman dipilih, booking akan langsung masuk status `Proses` (di-handle backend).
-
-API yang dipakai:
-- `POST /api/bookings`
-
-### 4) Booked - simpan foto hasil cukur
-Halaman: `src/pages/BookedList.tsx`
-
+## 4) `src/pages/RiwayatTransaksi.tsx`
 Perubahan:
-- Tiap kartu booking sekarang ada tombol `Foto Hasil Cukur`.
-- Dialog upload 4 sisi:
-  - Tampak Depan (`front`)
-  - Samping Kiri (`left`)
-  - Samping Kanan (`right`)
-  - Tampak Belakang (`back`)
-- Tersedia preview foto sebelum simpan.
-- Gambar dikompres di sisi frontend sebelum dikirim (canvas + JPEG quality) untuk menekan ukuran payload.
-- Menampilkan indikator jumlah foto tersimpan (`x/4`) pada kartu booking.
+- Modal lihat foto (icon mata) sekarang baca response:
+  - `{ bookingCode, foto: [...] }`
+- Slot tampilan mengikuti key `depan/kiri/kanan/belakang`
+- Tetap bisa klik untuk preview + zoom
 
-API yang dipakai:
-- `PATCH /api/bookings/:id/haircut-photos`
+## 5) `src/lib/api.ts`
+Perubahan type dan contract:
+- `Service`:
+  - `type_komisi`
+  - `nilai_komisi`
+- `Product`:
+  - `type_komisi`
+  - `nilai_komisi`
+- `HaircutPhotoSet`:
+  - `depan`, `kiri`, `kanan`, `belakang`
+- `BookingItem`:
+  - `foto?: HaircutPhotoSet[]`
+- API foto booking:
+  - `saveBookingHaircutPhotos(...)` kirim field `depan/kiri/kanan/belakang`
+  - `getBookingHaircutPhotosByCode(...)` menerima response `foto` array
 
-### 5) Setting Komisi (legacy info)
-Halaman: `src/pages/SettingKomisi.tsx`
+## Cara Pakai Fitur (User)
 
-Perubahan:
-- Halaman tidak lagi dipakai untuk set komisi global.
-- Diganti menjadi info bahwa komisi diatur di:
-  - Master Layanan
-  - Master Produk
-
-## Perubahan Type/API Client
-
-File: `src/lib/api.ts`
-
-Perubahan utama:
-- `Service` menambah:
-  - `commissionType`
-  - `commissionValue`
-- `Product` menambah:
-  - `commissionType`
-  - `commissionValue`
-- `BookingItem` menambah:
-  - `haircutPhotos`
-- Tambah type:
-  - `HaircutPhotoSet`
-- Tambah method API:
-  - `bulkUpdateServiceCommission(...)`
-  - `bulkUpdateProductCommission(...)`
-  - `saveBookingHaircutPhotos(...)`
-
-## Cara Menggunakan Fitur (Panduan User)
-
-### A. Set komisi massal layanan
-1. Buka menu `Master Layanan`.
-2. Centang layanan yang ingin diubah.
-3. Isi `Bulk Edit Komisi`:
-   - Pilih tipe (`Persentase` atau `Nominal`)
-   - Isi nilai
+## A. Set komisi massal layanan
+1. Buka `Master Layanan`.
+2. Centang beberapa layanan.
+3. Pilih tipe komisi + isi nilai.
 4. Klik `Terapkan`.
-5. Jika ada pengecualian, edit layanan satuan via tombol edit.
 
-### B. Set komisi massal produk
-1. Buka menu `Master Produk`.
-2. Centang produk yang ingin diubah.
-3. Isi `Bulk Edit Komisi`.
+## B. Set komisi massal produk
+1. Buka `Master Produk`.
+2. Centang beberapa produk.
+3. Pilih tipe komisi + isi nilai.
 4. Klik `Terapkan`.
-5. Lakukan fine-tuning per produk jika ada yang berbeda.
 
-### C. Buat booking dengan barberman
-1. Buka menu `Input Booking`.
-2. Isi data customer + pilih layanan.
-3. Pilih barberman di field `Pilih Barberman (Opsional)`.
+## C. Booking + barberman
+1. Buka `Input Booking`.
+2. Isi customer dan layanan.
+3. Pilih barberman (opsional).
 4. Simpan booking.
 
-Hasil:
-- Booking tersimpan dan bisa langsung diproses sesuai barber yang dipilih.
+Catatan:
+- Jika barberman tidak dipilih, booking tetap bisa tersimpan (status awal menunggu).
 
-### D. Simpan foto hasil cukur terakhir
-1. Buka menu `Booked`.
-2. Pilih kartu booking target.
-3. Klik `Foto Hasil Cukur`.
-4. Upload foto untuk 4 sisi (boleh parsial).
-5. Cek preview.
-6. Klik `Simpan Foto`.
+## D. Upload foto hasil cukur
+1. Buka `Booked`.
+2. Klik `Foto Hasil Cukur` pada card booking.
+3. Upload per sisi (`depan/kiri/kanan/belakang`).
+4. Klik `Simpan Foto`.
 
-Tips:
-- Foto dipotret dengan pencahayaan konsisten agar hasil before/after lebih mudah dibandingkan.
-- Untuk performa, gunakan ukuran foto wajar (frontend sudah otomatis kompres).
+## E. Lihat foto dari riwayat transaksi
+1. Buka `Riwayat Transaksi`.
+2. Klik icon mata di kolom aksi.
+3. Lihat 4 sisi foto, klik foto untuk modal zoom.
 
-## Catatan Teknis Implementasi Frontend
+## Catatan Teknis
 
-- Komponen baru tidak menambah route baru; seluruh fitur disisipkan ke halaman yang sudah ada.
-- Perubahan tetap menjaga pola existing UI (Card/Dialog/Button/Select dari komponen internal).
-- Alur lama tetap berjalan:
-  - booking, assign/proses, kasir, laporan.
-- Halaman `Setting Komisi` dipertahankan sebagai jalur transisi UX agar user lama tidak bingung.
+1. URL/path foto yang diterima frontend bisa berupa `/uploads/...`, lalu di-resolve ke origin API.
+2. Frontend tetap melakukan kompresi gambar sebelum upload untuk efisiensi.
+3. Perubahan ini menjaga kompatibilitas UX lama sambil mengikuti struktur data backend terbaru.
 
-## Checklist Uji Manual (Frontend)
+## Validasi Yang Sudah Dicek
 
-1. Buka `Master Layanan`, pastikan kolom komisi tampil.
-2. Coba bulk update komisi 2+ layanan.
-3. Buka `Master Produk`, ulangi bulk update.
-4. Buat booking baru, pilih barberman, simpan.
-5. Buka `Booked`, upload 1-4 foto hasil cukur, simpan.
-6. Pastikan toast sukses muncul dan data tetap tampil setelah reload.
-7. Buka `Setting Komisi`, pastikan tampil sebagai info legacy.
-
-## Validasi Build
-
-Build frontend sudah diuji:
+Perubahan terbaru sudah lolos:
 ```bash
+npx tsc --noEmit
 npm run build
 ```
 
-Status:
-- Berhasil build.
-- Ada warning ukuran chunk besar dari Vite (non-blocking, sudah ada sejak sebelumnya).
-
-## Referensi File yang Diubah
+## Referensi File FE Yang Terkait
 
 - `src/lib/api.ts`
 - `src/pages/MasterLayanan.tsx`
 - `src/pages/MasterProduk.tsx`
-- `src/pages/InputBooking.tsx`
 - `src/pages/BookedList.tsx`
+- `src/pages/RiwayatTransaksi.tsx`
+- `src/pages/InputBooking.tsx`
 - `src/pages/SettingKomisi.tsx`
-
