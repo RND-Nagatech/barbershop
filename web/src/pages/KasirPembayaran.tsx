@@ -3,6 +3,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -445,18 +446,18 @@ export default function KasirPembayaran() {
             <div className="space-y-2">
               <p className="text-xs text-muted-foreground">Tambah Produk</p>
               <div className="flex gap-2">
-                <select
-                  className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  value={selectedProduct}
-                  onChange={(e) => setSelectedProduct(e.target.value)}
-                >
-                  <option value="">Pilih produk...</option>
-                  {products.map((p) => (
-                    <option key={p.id} value={p.kode}>
-                      {p.nama} ({p.kode}) - stok {p.stok}
-                    </option>
-                  ))}
-                </select>
+                <Select value={selectedProduct} onValueChange={(v) => setSelectedProduct(v)}>
+                  <SelectTrigger className="h-10 w-full">
+                    <SelectValue placeholder="Pilih produk..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {products.map((p) => (
+                      <SelectItem key={p.id} value={p.kode}>
+                        {`${p.nama} (${p.kode}) - stok ${p.stok}`}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <Input
                   value={productQty}
                   autoUppercase={false}
@@ -635,18 +636,18 @@ export default function KasirPembayaran() {
             <div className="space-y-2">
               <p className="text-xs text-muted-foreground">Tambah Produk</p>
               <div className="flex gap-2">
-                <select
-                  className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  value={directSelectedProduct}
-                  onChange={(e) => setDirectSelectedProduct(e.target.value)}
-                >
-                  <option value="">Pilih produk...</option>
-                  {products.map((p) => (
-                    <option key={p.id} value={p.kode}>
-                      {p.nama} ({p.kode}) - stok {p.stok}
-                    </option>
-                  ))}
-                </select>
+                <Select value={directSelectedProduct} onValueChange={(v) => setDirectSelectedProduct(v)}>
+                  <SelectTrigger className="h-10 w-full">
+                    <SelectValue placeholder="Pilih produk..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {products.map((p) => (
+                      <SelectItem key={p.id} value={p.kode}>
+                        {`${p.nama} (${p.kode}) - stok ${p.stok}`}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <Input
                   className="w-24"
                   value={directQty}

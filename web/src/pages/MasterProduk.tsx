@@ -3,6 +3,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import {
@@ -256,14 +257,15 @@ export default function MasterProduk() {
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-2">
                   <Label>Tipe Komisi</Label>
-                  <select
-                    className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
-                    value={form.type_komisi}
-                    onChange={(e) => setForm({ ...form, type_komisi: e.target.value as "persentase" | "rupiah" })}
-                  >
-                    <option value="persentase">Persentase (%)</option>
-                    <option value="rupiah">Nominal (Rp)</option>
-                  </select>
+                    <Select value={form.type_komisi} onValueChange={(v) => setForm({ ...form, type_komisi: v as "persentase" | "rupiah" })}>
+                      <SelectTrigger className="w-full h-10">
+                        <SelectValue placeholder="Pilih tipe komisi" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="persentase">Persentase (%)</SelectItem>
+                        <SelectItem value="rupiah">Nominal (Rp)</SelectItem>
+                      </SelectContent>
+                    </Select>
                 </div>
                 <div className="space-y-2">
                   <Label>{form.type_komisi === "persentase" ? "Nilai Komisi (%)" : "Nilai Komisi (Rp)"}</Label>
@@ -299,14 +301,15 @@ export default function MasterProduk() {
           <div className="mb-4 rounded-lg border border-border/60 p-3">
             <div className="text-sm font-medium mb-2">Edit Komisi</div>
             <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
-              <select
-                className="h-10 rounded-md border border-input bg-background px-3 text-sm"
-                value={bulkCommissionType}
-                onChange={(e) => setBulkCommissionType(e.target.value as "persentase" | "rupiah")}
-              >
-                <option value="persentase">Persentase (%)</option>
-                <option value="rupiah">Nominal (Rp)</option>
-              </select>
+              <Select value={bulkCommissionType} onValueChange={(v) => setBulkCommissionType(v as "persentase" | "rupiah") }>
+                <SelectTrigger className="h-10">
+                  <SelectValue placeholder="Pilih tipe komisi" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="persentase">Persentase (%)</SelectItem>
+                  <SelectItem value="rupiah">Nominal (Rp)</SelectItem>
+                </SelectContent>
+              </Select>
               <Input
                 value={bulkCommissionType === "rupiah" ? formatNumberInput(bulkCommissionValue) : bulkCommissionValue}
                 inputMode="numeric"
