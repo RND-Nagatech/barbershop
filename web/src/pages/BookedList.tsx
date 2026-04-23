@@ -1,8 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Input } from "@/components/ui/input";
 import {
   AlertDialog,
-  AlertDialogTrigger,
   AlertDialogContent,
   AlertDialogHeader,
   AlertDialogTitle,
@@ -98,6 +97,16 @@ export default function BookedList() {
   const [photoSaving, setPhotoSaving] = useState(false);
   const [photoPreview, setPhotoPreview] = useState<{ src: string; label: string } | null>(null);
   const [photoZoom, setPhotoZoom] = useState(1);
+  const [photoPan, setPhotoPan] = useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+  const [photoPickerTarget, setPhotoPickerTarget] = useState<keyof typeof emptyFotoSet | null>(null);
+  const [cameraTarget, setCameraTarget] = useState<keyof typeof emptyFotoSet | null>(null);
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const [cameraError, setCameraError] = useState("");
+  const [cameraReady, setCameraReady] = useState(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const fileInputRefs = useRef<Partial<Record<keyof typeof emptyFotoSet, HTMLInputElement | null>>>({});
+  const panStartRef = useRef<{ x: number; y: number; originX: number; originY: number } | null>(null);
 
   const handleAssign = async () => {
     if (!assignTarget) return;
@@ -200,13 +209,180 @@ export default function BookedList() {
     setPhotoForm((prev) => ({ ...prev, [key]: "" }));
   };
 
+  const stopCamera = () => {
+    if (cameraStream) {
+      for (const track of cameraStream.getTracks()) {
+        track.stop();
+      }
+    }
+    setCameraStream(null);
+    setCameraTarget(null);
+    setCameraReady(false);
+    setCameraError("");
+  };
+
+  const startCamera = async (key: keyof typeof emptyFotoSet) => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      toast({
+        title: "Kamera tidak didukung",
+        description: "Browser ini tidak mendukung akses kamera. Gunakan opsi Pilih File.",
+        variant: "destructive",
+      });
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+        audio: false,
+      });
+      const track = stream.getVideoTracks()[0];
+      if (!track) {
+        setCameraError("Kamera tidak terdeteksi. Coba pilih file atau cek izin kamera.");
+        for (const t of stream.getTracks()) t.stop();
+        return;
+      }
+      setCameraTarget(key);
+      setCameraStream(stream);
+      setCameraError("");
+      setCameraReady(false);
+    } catch {
+      setCameraError("Gagal akses kamera. Izinkan kamera di browser lalu coba lagi.");
+      toast({
+        title: "Kamera tidak bisa dibuka",
+        description: "Pastikan izin kamera aktif dan aplikasi dibuka via browser yang mendukung HTTPS/localhost.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const captureFromCamera = () => {
+    if (!cameraTarget || !videoRef.current) return;
+    const video = videoRef.current;
+    const rawWidth = Math.max(1, video.videoWidth || 1);
+    const rawHeight = Math.max(1, video.videoHeight || 1);
+    const ratio = Math.min(1, 1280 / Math.max(rawWidth, rawHeight));
+    const width = Math.max(1, Math.round(rawWidth * ratio));
+    const height = Math.max(1, Math.round(rawHeight * ratio));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      toast({ title: "Gagal ambil foto", description: "Canvas tidak tersedia di browser.", variant: "destructive" });
+      return;
+    }
+    ctx.drawImage(video, 0, 0, width, height);
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.82);
+    setPhotoForm((prev) => ({ ...prev, [cameraTarget]: dataUrl }));
+    stopCamera();
+  };
+
+  const openPhotoSourcePicker = (key: keyof typeof emptyFotoSet) => {
+    setPhotoPickerTarget(key);
+  };
+
+  const choosePhotoSource = (source: "camera" | "file") => {
+    if (!photoPickerTarget) return;
+    if (source === "camera") {
+      void startCamera(photoPickerTarget);
+    } else {
+      const targetInput = fileInputRefs.current[photoPickerTarget];
+      targetInput?.click();
+    }
+    setPhotoPickerTarget(null);
+  };
+
   const openPhotoPreview = (src: string, label: string) => {
     setPhotoPreview({ src, label });
     setPhotoZoom(1);
+    setPhotoPan({ x: 0, y: 0 });
   };
 
   const zoomInPreview = () => setPhotoZoom((z) => Math.min(4, z + 0.2));
-  const zoomOutPreview = () => setPhotoZoom((z) => Math.max(1, z - 0.2));
+  const zoomOutPreview = () =>
+    setPhotoZoom((z) => {
+      const next = Math.max(1, z - 0.2);
+      if (next <= 1) {
+        setPhotoPan({ x: 0, y: 0 });
+      }
+      return next;
+    });
+
+  const handlePreviewPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (photoZoom <= 1) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    panStartRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      originX: photoPan.x,
+      originY: photoPan.y,
+    };
+    setIsPanning(true);
+  };
+
+  const handlePreviewPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!panStartRef.current || photoZoom <= 1) return;
+    const dx = e.clientX - panStartRef.current.x;
+    const dy = e.clientY - panStartRef.current.y;
+    setPhotoPan({
+      x: panStartRef.current.originX + dx,
+      y: panStartRef.current.originY + dy,
+    });
+  };
+
+  const handlePreviewPointerEnd = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+    panStartRef.current = null;
+    setIsPanning(false);
+  };
+
+  useEffect(() => {
+    if (!cameraStream) return;
+    let cancelled = false;
+    const attachStream = async (attempt = 0) => {
+      if (cancelled) return;
+      const video = videoRef.current;
+      if (!video) {
+        if (attempt < 20) {
+          requestAnimationFrame(() => {
+            void attachStream(attempt + 1);
+          });
+        }
+        return;
+      }
+      if (video.srcObject !== cameraStream) {
+        video.srcObject = cameraStream;
+      }
+      try {
+        await video.play();
+        if (!cancelled) setCameraReady(true);
+      } catch {
+        if (!cancelled) {
+          setCameraError("Preview kamera tidak bisa diputar. Coba buka kamera native.");
+        }
+      }
+    };
+    void attachStream();
+    return () => {
+      cancelled = true;
+    };
+  }, [cameraStream, cameraTarget]);
+
+  useEffect(() => {
+    return () => {
+      if (!cameraStream) return;
+      for (const track of cameraStream.getTracks()) {
+        track.stop();
+      }
+    };
+  }, [cameraStream]);
 
   const statusVariant: Record<string, string> = {
     Menunggu: "bg-muted text-muted-foreground",
@@ -419,6 +595,8 @@ export default function BookedList() {
           if (!open) {
             setPhotoTarget(null);
             setPhotoForm(emptyFotoSet);
+            setPhotoPickerTarget(null);
+            stopCamera();
           }
         }}
       >
@@ -431,19 +609,23 @@ export default function BookedList() {
               <div key={slot.key} className="space-y-2 rounded-md border border-border/70 p-2">
                 <div className="text-xs font-medium">{slot.label}</div>
                 <input
-                  id={`haircut-photo-${slot.key}`}
+                  ref={(el) => {
+                    fileInputRefs.current[slot.key] = el;
+                  }}
+                  id={`haircut-photo-file-${slot.key}`}
                   type="file"
                   accept="image/*"
                   className="hidden"
                   onChange={(e) => void handleChoosePhoto(slot.key, e.target.files?.[0])}
                 />
                 <div className="flex items-center gap-2">
-                  <label
-                    htmlFor={`haircut-photo-${slot.key}`}
+                  <button
+                    type="button"
+                    onClick={() => openPhotoSourcePicker(slot.key)}
                     className="inline-flex h-9 items-center rounded-md border border-input bg-background px-3 text-sm font-medium cursor-pointer hover:bg-accent/10"
                   >
                     {photoForm[slot.key] ? "Ganti Foto" : "Upload Foto"}
-                  </label>
+                  </button>
                   <span className="text-xs text-muted-foreground truncate">
                     {photoForm[slot.key] ? "Foto sudah dipilih" : "Belum ada file"}
                   </span>
@@ -480,24 +662,86 @@ export default function BookedList() {
         </DialogContent>
       </Dialog>
 
+      <AlertDialog open={!!photoPickerTarget} onOpenChange={(open) => !open && setPhotoPickerTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Pilih Sumber Foto</AlertDialogTitle>
+          </AlertDialogHeader>
+          <div className="text-sm text-muted-foreground">Pilih ambil foto langsung dari kamera atau pilih dari file.</div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Batal</AlertDialogCancel>
+            <AlertDialogAction onClick={() => choosePhotoSource("camera")} className="bg-accent text-accent-foreground hover:bg-accent/90">
+              Foto Kamera
+            </AlertDialogAction>
+            <AlertDialogAction onClick={() => choosePhotoSource("file")}>
+              Pilih File
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Dialog open={!!cameraTarget} onOpenChange={(open) => (!open ? stopCamera() : null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="font-display">Foto Kamera</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="relative overflow-hidden rounded-md border border-border/70 bg-black">
+              <video
+                ref={videoRef}
+                className="h-72 w-full object-cover"
+                autoPlay
+                playsInline
+                muted
+                onCanPlay={() => setCameraReady(true)}
+                onLoadedData={() => setCameraReady(true)}
+              />
+              {!cameraReady && (
+                <div className="absolute inset-0 z-10 flex h-72 w-full items-center justify-center text-sm text-white/80">
+                  Menghubungkan kamera...
+                </div>
+              )}
+            </div>
+            {cameraError ? <div className="text-xs text-destructive">{cameraError}</div> : null}
+            <div className="grid grid-cols-2 gap-2">
+              <Button variant="outline" onClick={stopCamera}>
+                Batal
+              </Button>
+              <Button onClick={captureFromCamera} className="bg-accent text-accent-foreground hover:bg-accent/90">
+                Ambil Foto
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <Dialog
         open={!!photoPreview}
         onOpenChange={(open) => {
           if (!open) {
             setPhotoPreview(null);
             setPhotoZoom(1);
+            setPhotoPan({ x: 0, y: 0 });
+            setIsPanning(false);
           }
         }}
       >
         <DialogContent className="w-[588px] h-[786px] max-w-[94vw] max-h-[92vh] border-none bg-transparent p-0 shadow-none [&>button]:hidden">
           <div className="relative mx-auto w-full h-full overflow-hidden rounded-2xl bg-black">
             {photoPreview?.src ? (
-              <div className="w-full h-full flex items-center justify-center p-2">
+              <div
+                className={`w-full h-full flex items-center justify-center p-2 select-none touch-none ${photoZoom > 1 ? (isPanning ? "cursor-grabbing" : "cursor-grab") : "cursor-default"}`}
+                onPointerDown={handlePreviewPointerDown}
+                onPointerMove={handlePreviewPointerMove}
+                onPointerUp={handlePreviewPointerEnd}
+                onPointerCancel={handlePreviewPointerEnd}
+              >
                 <img
                   src={photoPreview.src}
                   alt={photoPreview.label}
-                  className="block w-full h-full origin-center rounded-xl object-cover transition-transform duration-75"
-                  style={{ transform: `scale(${photoZoom})` }}
+                  draggable={false}
+                  className={`block w-full h-full origin-center rounded-xl object-cover ${isPanning ? "" : "transition-transform duration-75"}`}
+                  style={{ transform: `translate(${photoPan.x}px, ${photoPan.y}px) scale(${photoZoom})` }}
                 />
               </div>
             ) : null}
@@ -529,6 +773,8 @@ export default function BookedList() {
               onClick={() => {
                 setPhotoPreview(null);
                 setPhotoZoom(1);
+                setPhotoPan({ x: 0, y: 0 });
+                setIsPanning(false);
               }}
             >
               <X className="h-7 w-7" />

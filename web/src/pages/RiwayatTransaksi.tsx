@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -46,6 +46,9 @@ export default function RiwayatTransaksi() {
   } | null>(null);
   const [photoPreview, setPhotoPreview] = useState<{ src: string; label: string } | null>(null);
   const [photoZoom, setPhotoZoom] = useState(1);
+  const [photoPan, setPhotoPan] = useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+  const panStartRef = useRef<{ x: number; y: number; originX: number; originY: number } | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -107,9 +110,48 @@ export default function RiwayatTransaksi() {
   const openPhotoPreview = (src: string, label: string) => {
     setPhotoPreview({ src, label });
     setPhotoZoom(1);
+    setPhotoPan({ x: 0, y: 0 });
   };
   const zoomInPreview = () => setPhotoZoom((z) => Math.min(4, z + 0.2));
-  const zoomOutPreview = () => setPhotoZoom((z) => Math.max(1, z - 0.2));
+  const zoomOutPreview = () =>
+    setPhotoZoom((z) => {
+      const next = Math.max(1, z - 0.2);
+      if (next <= 1) {
+        setPhotoPan({ x: 0, y: 0 });
+      }
+      return next;
+    });
+
+  const handlePreviewPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (photoZoom <= 1) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    panStartRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      originX: photoPan.x,
+      originY: photoPan.y,
+    };
+    setIsPanning(true);
+  };
+
+  const handlePreviewPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (!panStartRef.current || photoZoom <= 1) return;
+    const dx = e.clientX - panStartRef.current.x;
+    const dy = e.clientY - panStartRef.current.y;
+    setPhotoPan({
+      x: panStartRef.current.originX + dx,
+      y: panStartRef.current.originY + dy,
+    });
+  };
+
+  const handlePreviewPointerEnd = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+    panStartRef.current = null;
+    setIsPanning(false);
+  };
 
   const receiptData: ReceiptData | null = useMemo(() => {
     if (!detail) return null;
@@ -330,18 +372,27 @@ export default function RiwayatTransaksi() {
           if (!open) {
             setPhotoPreview(null);
             setPhotoZoom(1);
+            setPhotoPan({ x: 0, y: 0 });
+            setIsPanning(false);
           }
         }}
       >
         <DialogContent className="w-[588px] h-[786px] max-w-[94vw] max-h-[92vh] border-none bg-transparent p-0 shadow-none [&>button]:hidden">
           <div className="relative mx-auto w-full h-full overflow-hidden rounded-2xl bg-black">
             {photoPreview?.src ? (
-              <div className="w-full h-full flex items-center justify-center p-2">
+              <div
+                className={`w-full h-full flex items-center justify-center p-2 select-none touch-none ${photoZoom > 1 ? (isPanning ? "cursor-grabbing" : "cursor-grab") : "cursor-default"}`}
+                onPointerDown={handlePreviewPointerDown}
+                onPointerMove={handlePreviewPointerMove}
+                onPointerUp={handlePreviewPointerEnd}
+                onPointerCancel={handlePreviewPointerEnd}
+              >
                 <img
                   src={photoPreview.src}
                   alt={photoPreview.label}
-                  className="block w-full h-full origin-center rounded-xl object-cover transition-transform duration-75"
-                  style={{ transform: `scale(${photoZoom})` }}
+                  draggable={false}
+                  className={`block w-full h-full origin-center rounded-xl object-cover ${isPanning ? "" : "transition-transform duration-75"}`}
+                  style={{ transform: `translate(${photoPan.x}px, ${photoPan.y}px) scale(${photoZoom})` }}
                 />
               </div>
             ) : null}
@@ -361,6 +412,8 @@ export default function RiwayatTransaksi() {
               onClick={() => {
                 setPhotoPreview(null);
                 setPhotoZoom(1);
+                setPhotoPan({ x: 0, y: 0 });
+                setIsPanning(false);
               }}
             >
               <X className="h-7 w-7" />
